@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_permission
 from app.db.session import get_db
 from app.modules.market_parser.repositories.product_repo import ProductRepository
 from app.modules.market_parser.repositories.snapshot_repo import SnapshotRepository
@@ -23,6 +24,7 @@ def list_products(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
     db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.products.read")),
 ):
     products = ProductRepository(db).list(source_id=source_id, category_id=category_id, name=name, sku=sku)
     if has_discount is None and is_available is None:
@@ -43,7 +45,11 @@ def list_products(
 
 
 @router.get("/products/{product_id}", response_model=ProductRead)
-def get_product(product_id: int, db: Session = Depends(get_db)):
+def get_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.products.read")),
+):
     product = ProductRepository(db).get(product_id)
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -56,5 +62,6 @@ def product_snapshots(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
     db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.products.read")),
 ):
     return SnapshotRepository(db).list_for_product(product_id, from_date, to_date)

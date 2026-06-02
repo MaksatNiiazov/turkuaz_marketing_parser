@@ -6,6 +6,9 @@ services:
     environment:
       DATABASE_URL: sqlite:////app/data/marketing_parser.db
       AUTO_CREATE_SCHEMA: "false"
+      AUTH_ENABLED: "true"
+      IDENTITY_SECRET_KEY: dev-change-me-32-byte-secret-key-for-turkuaz-identity
+      IDENTITY_ALGORITHM: HS256
     ports:
       - "8040:8040"
     volumes:
@@ -16,7 +19,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8040/api/v1/health', timeout=2)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8040/api/v1/ready', timeout=2)",
         ]
       interval: 10s
       timeout: 3s
@@ -28,6 +31,7 @@ services:
       dockerfile: marketing_parser/frontend/Dockerfile
     environment:
       VITE_PROXY_TARGET: http://marketing-parser:8040
+      VITE_IDENTITY_PROXY_TARGET: http://host.docker.internal:8020
     ports:
       - "5178:5178"
     depends_on:

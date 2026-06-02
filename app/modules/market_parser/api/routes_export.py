@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_permission
 from app.db.session import get_db
 from app.modules.market_parser.services.export_service import ExportService
 
@@ -12,7 +13,10 @@ router = APIRouter()
 
 
 @router.get("/export/products.xlsx")
-def export_products(db: Session = Depends(get_db)):
+def export_products(
+    db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.export.read")),
+):
     output = ExportService(db).products_xlsx()
     return xlsx_response(output, "market_products.xlsx")
 
@@ -22,6 +26,7 @@ def export_stats(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
     db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.export.read")),
 ):
     output = ExportService(db).stats_xlsx(from_date, to_date)
     return xlsx_response(output, "market_stats.xlsx")
@@ -33,6 +38,7 @@ def export_category(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
     db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.export.read")),
 ):
     output = ExportService(db).stats_xlsx(from_date, to_date, category_id=category_id)
     return xlsx_response(output, f"market_category_{category_id}.xlsx")

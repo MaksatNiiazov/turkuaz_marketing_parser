@@ -1,7 +1,7 @@
 [project]
 name = "turkuaz-marketing-parser"
 version = "0.1.0"
-description = "Market parser platform module with Globus Online source support."
+description = "Turkuaz market parser service with Globus Online source support."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
     "openpyxl>=3.1.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
+    "pyjwt>=2.9.0",
     "sqlalchemy>=2.0.30",
     "uvicorn[standard]>=0.30.0",
 ]

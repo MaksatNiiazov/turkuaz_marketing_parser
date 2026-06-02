@@ -56,7 +56,9 @@ API is exposed under:
 ## Permissions
 
 The module declares permission codes in `app/modules/market_parser/permissions.py`.
-Route-level enforcement can be connected to Identity once this service is registered in the platform:
+Backend routes validate the Turkuaz Identity JWT from `Authorization: Bearer <token>`.
+The frontend uses the shared `identity_access_token` localStorage key and proxies login/me
+requests to Identity through `/identity-api`.
 
 ```text
 market_parser.sources.read
@@ -68,6 +70,25 @@ market_parser.runs.create
 market_parser.products.read
 market_parser.stats.read
 market_parser.export.read
+```
+
+Identity settings:
+
+```text
+AUTH_ENABLED=true
+IDENTITY_SECRET_KEY=dev-change-me-32-byte-secret-key-for-turkuaz-identity
+IDENTITY_ALGORITHM=HS256
+VITE_IDENTITY_PROXY_TARGET=http://localhost:8020
+```
+
+Register the `market_parser` service in Identity and assign these permissions to the roles that
+should use parser sources, categories, manual runs, product history, reports, and exports.
+Identity bootstrap creates convenience roles:
+
+```text
+market_parser_viewer
+market_parser_operator
+market_parser_manager
 ```
 
 ## Globus Notes

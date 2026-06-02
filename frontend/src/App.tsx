@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { AppShell, Icon, platformServiceLinks } from '@turkuaz/ui';
+import type { FormEvent, ReactNode } from 'react';
+import { AppShell, Icon, serviceLinks } from '@turkuaz/ui';
 import {
   createSource,
-  exportUrl,
+  downloadFile,
   fetchCategories,
   fetchCategoryStats,
+  fetchMe,
   fetchRun,
   fetchProductSnapshots,
   fetchProductStats,
   fetchProducts,
   fetchRuns,
   fetchSources,
+  getToken,
+  login,
   setCategoryEnabled,
   startRun,
   syncCategories,
 } from './lib/api';
 import type {
   CategoryStats,
+  CurrentUser,
   MarketProduct,
   ParserCategory,
   ParserRun,
@@ -79,6 +83,8 @@ export function App() {
     base_url: 'https://globus-online.kg/ru-kg',
     type: 'html',
   });
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
 
   const selectedSource = sources.find((source) => source.id === selectedSourceId) ?? sources[0] ?? null;
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0] ?? null;
@@ -87,8 +93,14 @@ export function App() {
   const latestRun = runs[0] ?? null;
 
   const loadData = useCallback(async () => {
+    if (!getToken()) {
+      setIsAuthenticated(false);
+      setState({ loading: false, error: null });
+      return;
+    }
     setState({ loading: true, error: null });
     try {
+      const me = await fetchMe();
       const sourceRows = await fetchSources();
       const sourceId = selectedSourceId ?? sourceRows[0]?.id ?? null;
       const [categoryRows, runRows, productRows] = await Promise.all([
@@ -96,6 +108,8 @@ export function App() {
         sourceId ? fetchRuns(sourceId) : Promise.resolve([]),
         fetchProducts({ source_id: sourceId ?? undefined }),
       ]);
+      setCurrentUser(me);
+      setIsAuthenticated(true);
       setSources(sourceRows);
       setSelectedSourceId(sourceId);
       setCategories(categoryRows);
@@ -113,7 +127,12 @@ export function App() {
       );
       setState({ loading: false, error: null });
     } catch (error) {
-      setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      if (isAuthError(message)) {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      }
+      setState({ loading: false, error: message });
     }
   }, [selectedSourceId]);
 
@@ -222,7 +241,7 @@ export function App() {
         source_id: selectedSource.id,
         category_ids: selectedCategoryIds,
         parse_all_enabled: parseAllEnabled,
-        created_by: 'market-parser-ui',
+        created_by: currentUser?.email || 'market-parser-ui',
       });
       setRuns((rows) => [run, ...rows.filter((item) => item.id !== run.id)]);
       setActiveRunId(run.id);
@@ -287,19 +306,33 @@ export function App() {
     export: 'Готовые Excel выгрузки для маркетинга.',
   }[view];
 
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        error={state.error}
+        onLoggedIn={() => {
+          setIsAuthenticated(true);
+          void loadData();
+        }}
+      />
+    );
+  }
+
   return (
     <AppShell
       brand={{
-        href: 'http://localhost:5174',
+        href: '/',
         mark: 'T',
         title: 'Turkuaz Markets',
-        subtitle: selectedSource?.name || 'Market Parser',
+        subtitle: currentUser?.email || selectedSource?.name || 'Market Parser',
       }}
       navItems={navItems}
       sideLinks={[
-        ...platformServiceLinks,
+        ...serviceLinks.filter((link) => link.label !== 'Market Parser'),
         { href: '/docs', label: 'Swagger', icon: 'file', permissions: ['market_parser.products.read'] },
       ]}
+      accessClaims={currentUser}
+      tokenStorageKeys={['identity_access_token', 'access_token']}
       serviceName="Market Parser"
       pageTitle={pageTitle}
       pageDescription={pageDescription}
@@ -321,12 +354,11 @@ export function App() {
       ]}
       environment="local"
       version="v0.1.0"
-      apiStatus={state.error || actionState.error ? 'degraded' : 'online'}
+      apiStatus={isConnectivityError(state.error || actionState.error) ? 'offline' : 'online'}
       footerLinks={[{ href: '/docs', label: 'Swagger' }]}
-      storageKey="turkuaz-market-parser-shell"
     >
       {state.error || actionState.error ? (
-        <div className="notice">{state.error || actionState.error}</div>
+        <div className="notice">{errorMessage(state.error || actionState.error)}</div>
       ) : null}
 
       <section className="metrics-grid" aria-label="Market parser metrics">
@@ -429,6 +461,73 @@ export function App() {
         <ExportView selectedCategoryId={selectedCategoryId} from={filters.from} to={filters.to} />
       ) : null}
     </AppShell>
+  );
+}
+
+function LoginScreen({
+  error,
+  onLoggedIn,
+}: {
+  error: string | null;
+  onLoggedIn: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitState, setSubmitState] = useState<LoadState>({ loading: false, error: null });
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitState({ loading: true, error: null });
+    try {
+      await login(email, password);
+      setSubmitState({ loading: false, error: null });
+      onLoggedIn();
+    } catch (submitError) {
+      setSubmitState({
+        loading: false,
+        error: submitError instanceof Error ? submitError.message : String(submitError),
+      });
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-panel">
+        <div className="login-mark">T</div>
+        <div>
+          <p className="login-kicker">Turkuaz Ecosystem</p>
+          <h1>Market Parser</h1>
+          <p>Войдите через Identity, чтобы работать с категориями, запусками, товарами и экспортом.</p>
+        </div>
+        {error || submitState.error ? <div className="notice">{submitState.error || error}</div> : null}
+        <form className="login-form" onSubmit={(event) => void handleSubmit(event)}>
+          <label>
+            <span>Email</span>
+            <input
+              autoComplete="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            <span>Пароль</span>
+            <input
+              autoComplete="current-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </label>
+          <button className="primary-button" type="submit" disabled={submitState.loading}>
+            <Icon name="shield" size={16} />
+            Войти
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 
@@ -1066,6 +1165,7 @@ function ReportsView({
 }
 
 function ExportView({ selectedCategoryId, from, to }: { selectedCategoryId: number | null; from: string; to: string }) {
+  const [state, setState] = useState<LoadState>({ loading: false, error: null });
   const period = new URLSearchParams();
   if (from) period.set('from', from);
   if (to) period.set('to', to);
@@ -1074,30 +1174,53 @@ function ExportView({ selectedCategoryId, from, to }: { selectedCategoryId: numb
     {
       title: 'Все товары',
       text: 'Совместимая выгрузка с sku, name, title, price, discount_price, media.',
-      href: exportUrl('/api/v1/market-parser/export/products.xlsx'),
+      path: '/api/v1/market-parser/export/products.xlsx',
+      filename: 'market_products.xlsx',
     },
     {
       title: 'Статистика',
       text: 'Листы Товары, Цены, Скидки, Изменения и Свод за период.',
-      href: exportUrl(`/api/v1/market-parser/export/stats.xlsx${suffix}`),
+      path: `/api/v1/market-parser/export/stats.xlsx${suffix}`,
+      filename: 'market_stats.xlsx',
     },
     {
       title: 'Категория',
       text: 'Отдельный Excel по выбранной категории.',
-      href: exportUrl(`/api/v1/market-parser/export/category/${selectedCategoryId ?? 0}.xlsx${suffix}`),
+      path: `/api/v1/market-parser/export/category/${selectedCategoryId ?? 0}.xlsx${suffix}`,
+      filename: `market_category_${selectedCategoryId ?? 0}.xlsx`,
       disabled: !selectedCategoryId,
     },
   ];
+
+  async function handleDownload(path: string, filename: string) {
+    setState({ loading: true, error: null });
+    try {
+      await downloadFile(path, filename);
+      setState({ loading: false, error: null });
+    } catch (error) {
+      setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   return (
-    <section className="export-grid">
-      {items.map((item) => (
-        <a className={item.disabled ? 'export-card disabled' : 'export-card'} href={item.disabled ? undefined : item.href} key={item.title}>
-          <Icon name="file" size={22} />
-          <strong>{item.title}</strong>
-          <span>{item.text}</span>
-        </a>
-      ))}
-    </section>
+    <>
+      {state.error ? <div className="notice">{state.error}</div> : null}
+      <section className="export-grid">
+        {items.map((item) => (
+          <button
+            className={item.disabled ? 'export-card disabled' : 'export-card'}
+            disabled={item.disabled || state.loading}
+            key={item.title}
+            type="button"
+            onClick={() => void handleDownload(item.path, item.filename)}
+          >
+            <Icon name="file" size={22} />
+            <strong>{item.title}</strong>
+            <span>{item.text}</span>
+          </button>
+        ))}
+      </section>
+    </>
   );
 }
 
@@ -1153,6 +1276,23 @@ function filterCategoryTree(categories: ParserCategory[], query: string): Parser
 
 function isRunActive(run: ParserRun): boolean {
   return run.status === 'pending' || run.status === 'running';
+}
+
+function isAuthError(message: string): boolean {
+  return message === 'Not authenticated' || message === 'Invalid token' || message.includes('HTTP 401');
+}
+
+function isConnectivityError(message: string | null): boolean {
+  if (!message) return false;
+  return /failed to fetch|networkerror|network request failed|load failed|econnrefused|timeout/i.test(message);
+}
+
+function errorMessage(message: string | null): string {
+  if (!message) return '';
+  if (message.startsWith('Missing permission:')) {
+    return `Недостаточно прав доступа. ${message}. После изменения ролей выйдите и войдите заново.`;
+  }
+  return message;
 }
 
 function progressPercent(run: ParserRun): number {

@@ -11,7 +11,11 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8040',
         changeOrigin: true,
       },
+      '/identity-api': {
+        target: process.env.VITE_IDENTITY_PROXY_TARGET || 'http://localhost:8020',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/identity-api/, '/api/v1'),
+      },
     },
   },
 });
-

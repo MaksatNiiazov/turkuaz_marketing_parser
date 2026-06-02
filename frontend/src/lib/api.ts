@@ -1,5 +1,6 @@
 import type {
   CategoryStats,
+  CurrentUser,
   MarketProduct,
   ParserCategory,
   ParserRun,
@@ -9,18 +10,56 @@ import type {
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const IDENTITY_API_BASE_URL = import.meta.env.VITE_IDENTITY_API_BASE_URL || '/identity-api';
+const TOKEN_KEY = 'identity_access_token';
+const FALLBACK_TOKEN_KEY = 'access_token';
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(FALLBACK_TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(FALLBACK_TOKEN_KEY);
+}
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401) clearToken();
+    throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
+  }
+  return data as T;
+}
+
+async function requestIdentityJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${IDENTITY_API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    if (response.status === 401) clearToken();
     throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
   }
   return data as T;
@@ -130,6 +169,40 @@ export function fetchCategoryStats(
   );
 }
 
-export function exportUrl(path: string): string {
-  return `${API_BASE_URL}${path}`;
+export async function login(email: string, password: string): Promise<void> {
+  const data = await requestIdentityJson<{ access_token: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  setToken(data.access_token);
+}
+
+export function fetchMe(): Promise<CurrentUser> {
+  return requestIdentityJson<CurrentUser>('/auth/me');
+}
+
+export async function downloadFile(path: string, fallbackFilename: string): Promise<void> {
+  const token = getToken();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 401) clearToken();
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || fallbackFilename;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

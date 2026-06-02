@@ -1,3 +1,66 @@
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--teal) 18%, transparent), transparent 34%),
+    var(--bg);
+  color: var(--text);
+  padding: 24px;
+}
+
+.login-panel {
+  display: grid;
+  gap: 18px;
+  width: min(420px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.login-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--teal), var(--teal-strong));
+  color: #fff;
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.login-kicker {
+  margin: 0 0 6px;
+  color: var(--teal-strong);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.login-panel h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.login-panel p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
 .notice {
   margin-bottom: 16px;
   border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--border));
@@ -81,6 +144,10 @@
   font-size: 13px;
   font-weight: 800;
   padding: 0 13px;
+}
+
+.export-card {
+  text-align: left;
 }
 
 .text-button {

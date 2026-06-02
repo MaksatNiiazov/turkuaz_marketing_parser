@@ -102,3 +102,20 @@ export type CategoryStats = {
   price_decreased_products: number;
 };
 
+export type CurrentUser = {
+  id: number;
+  active: boolean;
+  email: string;
+  full_name: string;
+  branch_id: number | null;
+  active_branch_id: number | null;
+  branch_code: string | null;
+  branch_name: string | null;
+  branch: { id: number; code: string; name: string } | null;
+  roles: string[];
+  permissions: string[];
+  branches: string[];
+  branch_permissions: Record<string, string[]>;
+  branch_permissions_by_id: Record<string, string[]>;
+  department: string | null;
+};
