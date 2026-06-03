@@ -63,6 +63,7 @@ cd frontend
 npm install
 $env:VITE_PROXY_TARGET = "http://127.0.0.1:8503"
 $env:VITE_IDENTITY_PROXY_TARGET = "http://127.0.0.1:8500"
+$env:VITE_IDENTITY_API_FALLBACK_BASE_URL = "http://SERVER_IP_OR_DOMAIN:7500/api/v1"
 npm run dev -- --host 0.0.0.0 --port 7503
 ```
 
@@ -78,7 +79,7 @@ public backend URL before building:
 ```powershell
 cd frontend
 $env:VITE_API_BASE_URL = "http://SERVER_IP_OR_DOMAIN:8503"
-$env:VITE_IDENTITY_API_BASE_URL = "http://SERVER_IP_OR_DOMAIN:8500/api/v1"
+$env:VITE_IDENTITY_API_BASE_URL = "http://SERVER_IP_OR_DOMAIN:7500/api/v1"
 npm run build
 ```
 
@@ -88,10 +89,12 @@ Use either:
 
 ```text
 IIS 7503 -> /api/* reverse proxy -> http://127.0.0.1:8503/api/*
+IIS 7503 -> /identity-api/* reverse proxy -> http://127.0.0.1:8500/api/v1/*
 ```
 
 or rebuild the frontend with `VITE_API_BASE_URL=http://SERVER_IP_OR_DOMAIN:8503` and open TCP port
-`8503` in Windows Firewall.
+`8503` in Windows Firewall. Identity can stay behind its own IIS frontend by using
+`VITE_IDENTITY_API_BASE_URL=http://SERVER_IP_OR_DOMAIN:7500/api/v1`.
 
 ## Module
 

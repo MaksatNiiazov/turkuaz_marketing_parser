@@ -12,7 +12,7 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const IDENTITY_API_BASE_URL = import.meta.env.VITE_IDENTITY_API_BASE_URL || '/identity-api';
 const IDENTITY_API_FALLBACK_BASE_URL =
-  import.meta.env.VITE_IDENTITY_API_FALLBACK_BASE_URL || `${localApiUrl(8500)}/api/v1`;
+  import.meta.env.VITE_IDENTITY_API_FALLBACK_BASE_URL || `${localApiUrl(7500)}/api/v1`;
 const TOKEN_KEY = 'identity_access_token';
 const FALLBACK_TOKEN_KEY = 'access_token';
 export const DEV_ADMIN_EMAIL = import.meta.env.VITE_DEV_ADMIN_EMAIL || 'admin@example.com';
@@ -88,6 +88,9 @@ async function requestIdentityJsonFromBase<T>(
     if (response.status === 401) clearToken();
     throw new HttpError(response.status, data?.detail || data?.message || `HTTP ${response.status}`);
   }
+  if (!isJsonObject(data)) {
+    throw new InvalidIdentityResponseError(`Identity returned non-JSON response from ${baseUrl}`);
+  }
   return data as T;
 }
 
@@ -99,6 +102,10 @@ function shouldRetryIdentityRequest(error: unknown): boolean {
   return !(error instanceof HttpError) || error.status === 404 || error.status === 405;
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 class HttpError extends Error {
   constructor(
     public readonly status: number,
@@ -107,6 +114,8 @@ class HttpError extends Error {
     super(message);
   }
 }
+
+class InvalidIdentityResponseError extends Error {}
 
 function localApiUrl(port: number): string {
   if (typeof window === 'undefined') return `http://localhost:${port}`;
