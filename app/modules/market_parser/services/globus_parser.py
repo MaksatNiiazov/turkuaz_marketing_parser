@@ -65,6 +65,7 @@ class GlobusParser(BaseMarketParser):
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ru,en;q=0.8",
         }
+        self._sku_by_product_id: dict[str, str] = {}
 
     async def fetch_categories(self) -> list[ParsedCategory]:
         text = await self._get_text(self.base_url)
@@ -103,31 +104,35 @@ class GlobusParser(BaseMarketParser):
         text = await self._get_text(category.url)
         data = self._extract_state(text)
         products = list(self._iter_product_dicts(data))
+        await self._enrich_product_skus(products)
         parsed = [self.normalize_product(product, category) for product in products]
         return [product for product in parsed if product is not None]
 
     async def _get_text(self, url: str) -> str:
-        last_error: Exception | None = None
         async with httpx.AsyncClient(
             timeout=settings.parser_request_timeout,
             headers=self.headers,
             follow_redirects=True,
         ) as client:
-            for attempt in range(settings.parser_max_retries):
-                try:
-                    response = await client.get(url)
-                    if response.status_code >= 500:
-                        raise httpx.HTTPStatusError(
-                            f"Server error {response.status_code}",
-                            request=response.request,
-                            response=response,
-                        )
-                    response.raise_for_status()
-                    return response.text
-                except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.TransportError) as exc:
-                    last_error = exc
-                    logger.warning("globus request failed", extra={"url": url, "attempt": attempt + 1})
-                    await asyncio.sleep(0.4 * (attempt + 1))
+            return await self._request_text(client, url)
+
+    async def _request_text(self, client: httpx.AsyncClient, url: str) -> str:
+        last_error: Exception | None = None
+        for attempt in range(settings.parser_max_retries):
+            try:
+                response = await client.get(url)
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        f"Server error {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                response.raise_for_status()
+                return response.text
+            except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.TransportError) as exc:
+                last_error = exc
+                logger.warning("globus request failed", extra={"url": url, "attempt": attempt + 1})
+                await asyncio.sleep(0.4 * (attempt + 1))
         assert last_error is not None
         raise last_error
 
@@ -139,11 +144,13 @@ class GlobusParser(BaseMarketParser):
             logger.warning("globus product skipped: no title", extra={"item": item})
             return None
 
-        product_id = str(item.get("id") or item.get("sku") or "").strip() or None
+        product_id = clean_text(item.get("id")) or None
         product_url = (
             urljoin(self.base_url, f"/ru-kg/good/{product_id}") if product_id else None
         )
-        external_sku = product_id or stable_product_hash(product_url, title, category.name if category else None)
+        external_sku = self._sku_from_item(item) or product_id or stable_product_hash(
+            product_url, title, category.name if category else None
+        )
         current_price = to_decimal(item.get("currentPrice") or item.get("price"))
         old_price = to_decimal(item.get("oldPrice"))
         discount_price = current_price if old_price and current_price and current_price < old_price else None
@@ -167,6 +174,78 @@ class GlobusParser(BaseMarketParser):
             is_available=item.get("available"),
             raw_data=item,
         )
+
+    async def _enrich_product_skus(self, products: list[dict[str, Any]]) -> None:
+        self._enrich_product_skus_from_cache(products)
+        products_without_sku = [
+            item
+            for item in products
+            if not self._sku_from_item(item) and clean_text(item.get("id"))
+        ]
+        if not products_without_sku:
+            return
+
+        detail_concurrency = max(settings.parser_product_detail_concurrency, 1)
+        semaphore = asyncio.Semaphore(detail_concurrency)
+
+        async def enrich(client: httpx.AsyncClient, item: dict[str, Any]) -> None:
+            product_id = clean_text(item.get("id"))
+            product_url = urljoin(self.base_url, f"/ru-kg/good/{product_id}")
+            async with semaphore:
+                if settings.parser_product_detail_request_delay_ms > 0:
+                    await asyncio.sleep(settings.parser_product_detail_request_delay_ms / 1000)
+                try:
+                    detail = await self._fetch_product_detail(product_url, product_id, client)
+                except Exception:
+                    logger.warning(
+                        "globus product sku enrichment failed",
+                        extra={"url": product_url},
+                    )
+                    return
+
+            sku = self._sku_from_item(detail)
+            if sku:
+                item["pigeonId"] = sku
+                self._sku_by_product_id[product_id] = sku
+
+        async with httpx.AsyncClient(
+            timeout=settings.parser_request_timeout,
+            headers=self.headers,
+            follow_redirects=True,
+        ) as client:
+            await asyncio.gather(*(enrich(client, item) for item in products_without_sku))
+
+    async def _fetch_product_detail(
+        self, product_url: str, product_id: str, client: httpx.AsyncClient | None = None
+    ) -> dict[str, Any]:
+        if client:
+            text = await self._request_text(client, product_url)
+        else:
+            text = await self._get_text(product_url)
+        data = self._extract_state(text)
+        for item in self._iter_product_dicts(data):
+            if clean_text(item.get("id")) == product_id:
+                return item
+        return {}
+
+    def _enrich_product_skus_from_cache(self, products: list[dict[str, Any]]) -> None:
+        for item in products:
+            product_id = clean_text(item.get("id"))
+            sku = self._sku_from_item(item) or (
+                self._sku_by_product_id.get(product_id) if product_id else None
+            )
+            if sku:
+                item["pigeonId"] = sku
+                if product_id:
+                    self._sku_by_product_id[product_id] = sku
+
+    @staticmethod
+    def _sku_from_item(item: dict[str, Any]) -> str | None:
+        for key in ("pigeonId", "sku", "externalSku", "productCode", "article", "barcode"):
+            value = clean_text(item.get(key))
+            if value:
+                return value
+        return None
 
     @staticmethod
     def calculate_discount_percent(
