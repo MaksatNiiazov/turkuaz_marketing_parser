@@ -12,7 +12,7 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const IDENTITY_API_BASE_URL = import.meta.env.VITE_IDENTITY_API_BASE_URL || '/identity-api';
 const IDENTITY_API_FALLBACK_BASE_URL =
-  import.meta.env.VITE_IDENTITY_API_FALLBACK_BASE_URL || `${localApiUrl(7500)}/api/v1`;
+  import.meta.env.VITE_IDENTITY_API_FALLBACK_BASE_URL || `${localApiUrl(8500)}/api/v1`;
 const TOKEN_KEY = 'identity_access_token';
 const FALLBACK_TOKEN_KEY = 'access_token';
 export const DEV_ADMIN_EMAIL = import.meta.env.VITE_DEV_ADMIN_EMAIL || 'admin@example.com';
@@ -74,15 +74,24 @@ async function requestIdentityJsonFromBase<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const token = getToken();
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init.headers,
-    },
-  });
+  const url = `${baseUrl}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Identity API недоступен по ${url}. Проверьте адрес, порт и CORS. ${message}`,
+    );
+  }
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 401) clearToken();
@@ -99,7 +108,12 @@ function uniqueBaseUrls(values: string[]): string[] {
 }
 
 function shouldRetryIdentityRequest(error: unknown): boolean {
-  return !(error instanceof HttpError) || error.status === 404 || error.status === 405;
+  return (
+    !(error instanceof HttpError) ||
+    error.status === 404 ||
+    error.status === 405 ||
+    error.status >= 500
+  );
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
