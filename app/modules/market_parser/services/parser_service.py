@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.session import SessionLocal
 from app.modules.market_parser.models.entities import ParserRun
 from app.modules.market_parser.repositories.category_repo import CategoryRepository
 from app.modules.market_parser.repositories.run_repo import RunRepository
@@ -15,6 +16,7 @@ from app.modules.market_parser.repositories.source_repo import SourceRepository
 from app.modules.market_parser.schemas.category import CategoryCreate
 from app.modules.market_parser.schemas.run import RunCreate
 from app.modules.market_parser.services.globus_parser import BaseMarketParser, GlobusParser
+from app.modules.market_parser.services.run_control import register_run_control, unregister_run_control
 from app.modules.market_parser.services.snapshot_service import SnapshotService
 
 logger = logging.getLogger(__name__)
@@ -104,116 +106,168 @@ class ParserService:
         return run
 
     async def execute_parser_run(self, payload: RunCreate, run_id: int) -> ParserRun:
-        source = self.sources.get(payload.source_id)
-        if source is None:
-            raise ValueError("Source not found")
-        categories = self._parse_categories(source.id, payload)
-        run = self.runs.get(run_id)
-        if run is None:
-            raise ValueError("Run not found")
-        logger.info("parser run started", extra={"run_id": run.id, "source": source.code})
+        control = register_run_control(run_id)
+        try:
+            source = self.sources.get(payload.source_id)
+            if source is None:
+                raise ValueError("Source not found")
+            categories = self._parse_categories(source.id, payload)
+            run = self.runs.get(run_id)
+            if run is None:
+                raise ValueError("Run not found")
+            logger.info("parser run started", extra={"run_id": run.id, "source": source.code})
 
-        parser = self._parser_for_source(source.code, source.base_url)
-        processed = 0
-        total_products = 0
-        saved_products = 0
-        errors: list[str] = []
-
-        tasks = []
-        parser_concurrency = max(settings.parser_concurrency, 1)
-        if settings.parser_polite_mode_enabled:
-            parser_concurrency = min(parser_concurrency, 2)
-        semaphore = asyncio.Semaphore(parser_concurrency)
-        for category in categories:
-            run_category = self.runs.start_category(run.id, category.id)
-            self.db.commit()
-            tasks.append(
-                asyncio.create_task(
-                    self._fetch_category_products(parser, category, run_category.id, semaphore)
-                )
-            )
-
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            run_category = self.runs.get_category(result.run_category_id)
-            if run_category is None:
-                errors.append(f"{result.category_name}: run category not found")
-                processed += 1
-                continue
-            try:
-                if result.error is not None:
-                    raise result.error
-                category_saved = 0
-                for product in result.products:
-                    self.snapshots.save_product_snapshot(
-                        source_id=source.id,
-                        category_id=result.category_id,
-                        run_id=run.id,
-                        parsed=product,
+            parser = self._parser_for_source(source.code, source.base_url)
+            processed = 0
+            total_products = 0
+            saved_products = 0
+            errors: list[str] = []
+            tasks = set()
+            parser_concurrency = max(settings.parser_concurrency, 1)
+            if settings.parser_polite_mode_enabled:
+                parser_concurrency = min(parser_concurrency, 2)
+            semaphore = asyncio.Semaphore(parser_concurrency)
+            for category in categories:
+                run_category = self.runs.start_category(run.id, category.id)
+                self.db.commit()
+                tasks.add(
+                    asyncio.create_task(
+                        self._fetch_category_products(parser, category, run_category.id, semaphore)
                     )
-                    category_saved += 1
-                processed += 1
-                total_products += len(result.products)
-                saved_products += category_saved
-                self.runs.finish_category(
-                    run_category,
-                    status="success",
-                    products_found=len(result.products),
-                    products_saved=category_saved,
-                )
-                self.runs.update_progress(
-                    run,
-                    processed_categories=processed,
-                    total_products=total_products,
-                    saved_products=saved_products,
-                    error_message="\n".join(errors) or None,
-                )
-                self.db.commit()
-                logger.info(
-                    "parser category completed",
-                    extra={
-                        "run_id": run.id,
-                        "category_id": result.category_id,
-                        "products": len(result.products),
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001
-                processed += 1
-                message = summarize_parser_error(exc)
-                errors.append(f"{result.category_name}: {message}")
-                self.db.rollback()
-                run = self.runs.get(run.id)
-                assert run is not None
-                run_category = self.runs.get_category(result.run_category_id)
-                if run_category is not None:
-                    self.runs.finish_category(run_category, status="failed", error_message=message)
-                self.runs.update_progress(
-                    run,
-                    processed_categories=processed,
-                    total_products=total_products,
-                    saved_products=saved_products,
-                    error_message="\n".join(errors) or None,
-                )
-                self.db.commit()
-                logger.exception(
-                    "parser category failed",
-                    extra={"run_id": run.id, "category_id": result.category_id},
                 )
 
-        status = "success" if not errors else ("failed" if saved_products == 0 else "partial")
-        finished_run = self.runs.get(run.id)
-        assert finished_run is not None
+            stop_task = asyncio.create_task(self._wait_for_stop_request(run.id, control.stop_event))
+            while tasks:
+                done, pending = await asyncio.wait(
+                    tasks | {stop_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                tasks = pending - {stop_task}
+                if stop_task in done:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    return self._finish_stopped_run(run.id, processed, total_products, saved_products, errors)
+
+                for task in done:
+                    result = await task
+                    run_category = self.runs.get_category(result.run_category_id)
+                    if run_category is None:
+                        errors.append(f"{result.category_name}: run category not found")
+                        processed += 1
+                        continue
+                    try:
+                        if result.error is not None:
+                            raise result.error
+                        category_saved = 0
+                        for product in result.products:
+                            self.snapshots.save_product_snapshot(
+                                source_id=source.id,
+                                category_id=result.category_id,
+                                run_id=run.id,
+                                parsed=product,
+                            )
+                            category_saved += 1
+                        processed += 1
+                        total_products += len(result.products)
+                        saved_products += category_saved
+                        self.runs.finish_category(
+                            run_category,
+                            status="success",
+                            products_found=len(result.products),
+                            products_saved=category_saved,
+                        )
+                        self.runs.update_progress(
+                            run,
+                            processed_categories=processed,
+                            total_products=total_products,
+                            saved_products=saved_products,
+                            error_message="\n".join(errors) or None,
+                        )
+                        self.db.commit()
+                        logger.info(
+                            "parser category completed",
+                            extra={
+                                "run_id": run.id,
+                                "category_id": result.category_id,
+                                "products": len(result.products),
+                            },
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        processed += 1
+                        message = summarize_parser_error(exc)
+                        errors.append(f"{result.category_name}: {message}")
+                        self.db.rollback()
+                        run = self.runs.get(run.id)
+                        assert run is not None
+                        run_category = self.runs.get_category(result.run_category_id)
+                        if run_category is not None:
+                            self.runs.finish_category(run_category, status="failed", error_message=message)
+                        self.runs.update_progress(
+                            run,
+                            processed_categories=processed,
+                            total_products=total_products,
+                            saved_products=saved_products,
+                            error_message="\n".join(errors) or None,
+                        )
+                        self.db.commit()
+                        logger.exception(
+                            "parser category failed",
+                            extra={"run_id": run.id, "category_id": result.category_id},
+                        )
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+
+            status = "success" if not errors else ("failed" if saved_products == 0 else "partial")
+            finished_run = self.runs.get(run.id)
+            assert finished_run is not None
+            self.runs.finish_run(
+                finished_run,
+                status=status,
+                processed_categories=processed,
+                total_products=total_products,
+                saved_products=saved_products,
+                error_message="\n".join(errors) or None,
+            )
+            self.db.commit()
+            logger.info("parser run finished", extra={"run_id": run.id, "status": status})
+            return finished_run
+        finally:
+            unregister_run_control(run_id)
+
+    async def _wait_for_stop_request(self, run_id: int, stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            await asyncio.sleep(2)
+            with SessionLocal() as db:
+                run = RunRepository(db).get(run_id)
+                if run is not None and run.status == "stopping":
+                    stop_event.set()
+
+    def _finish_stopped_run(
+        self,
+        run_id: int,
+        processed: int,
+        total_products: int,
+        saved_products: int,
+        errors: list[str],
+    ) -> ParserRun:
+        message = "Остановлено пользователем"
+        if message not in errors:
+            errors.append(message)
+        run = self.runs.get(run_id)
+        assert run is not None
+        self.runs.finish_unfinished_categories(run_id, status="stopped", error_message=message)
         self.runs.finish_run(
-            finished_run,
-            status=status,
+            run,
+            status="stopped",
             processed_categories=processed,
             total_products=total_products,
             saved_products=saved_products,
-            error_message="\n".join(errors) or None,
+            error_message="\n".join(errors),
         )
         self.db.commit()
-        logger.info("parser run finished", extra={"run_id": run.id, "status": status})
-        return finished_run
+        logger.info("parser run stopped", extra={"run_id": run.id})
+        return run
 
     async def _fetch_category_products(
         self,

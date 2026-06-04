@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.modules.market_parser.repositories.run_repo import RunRepository
 from app.modules.market_parser.schemas.run import RunCreate, RunRead
 from app.modules.market_parser.services.parser_service import ParserService
+from app.modules.market_parser.services.run_control import request_run_stop
 from app.modules.market_parser.tasks.parser_tasks import execute_market_parser_run
 
 router = APIRouter()
@@ -47,3 +48,24 @@ def get_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.post("/runs/{run_id}/stop", response_model=RunRead)
+def stop_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.runs.create")),
+):
+    runs = RunRepository(db)
+    run = runs.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in {"pending", "running", "stopping"}:
+        raise HTTPException(status_code=409, detail="Run is not active")
+    if run.status != "stopping":
+        run = runs.request_stop(run, "Остановка запрошена пользователем")
+        db.commit()
+    request_run_stop(run.id)
+    refreshed = runs.get(run.id)
+    assert refreshed is not None
+    return refreshed

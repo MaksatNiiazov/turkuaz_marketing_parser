@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from app.modules.market_parser.services.export_service import ExportService
 from app.modules.market_parser.services.globus_parser import ParsedProduct
 from app.modules.market_parser.services.parser_service import ParserService
 from app.modules.market_parser.services.parser_service import summarize_parser_error
+from app.modules.market_parser.services.run_control import request_run_stop
 from app.modules.market_parser.services.snapshot_service import SnapshotService
 
 
@@ -40,6 +42,15 @@ class FakeParser:
                 raw_data={"id": category.id},
             )
         ]
+
+
+class SlowParser:
+    async def fetch_categories(self):
+        return []
+
+    async def fetch_products_by_category(self, category):
+        await asyncio.sleep(30)
+        return []
 
 
 def seed_source_categories(db_session):
@@ -75,6 +86,26 @@ async def test_run_keeps_going_when_category_fails(db_session, monkeypatch) -> N
     assert run.saved_products == 1
     assert "category failed" in (run.error_message or "")
     assert len(ProductRepository(db_session).list()) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_can_be_stopped(db_session, monkeypatch) -> None:
+    source, good, _ = seed_source_categories(db_session)
+    monkeypatch.setattr(ParserService, "_parser_for_source", lambda self, code, base_url: SlowParser())
+    payload = RunCreate(source_id=source.id, category_ids=[good.id])
+    service = ParserService(db_session)
+    run = service.create_parser_run(payload)
+
+    task = asyncio.create_task(service.execute_parser_run(payload, run.id))
+    for _ in range(10):
+        if request_run_stop(run.id):
+            break
+        await asyncio.sleep(0)
+    finished = await asyncio.wait_for(task, timeout=3)
+
+    assert finished.status == "stopped"
+    assert finished.processed_categories == 0
+    assert "Остановлено пользователем" in (finished.error_message or "")
 
 
 def test_export_xlsx(db_session) -> None:

@@ -175,6 +175,12 @@ export function fetchRun(runId: number): Promise<ParserRun> {
   return requestJson<ParserRun>(`/api/v1/market-parser/runs/${runId}`);
 }
 
+export function stopRun(runId: number): Promise<ParserRun> {
+  return requestJson<ParserRun>(`/api/v1/market-parser/runs/${runId}/stop`, {
+    method: 'POST',
+  });
+}
+
 export function fetchProducts(filters: {
   source_id?: number;
   category_id?: number;

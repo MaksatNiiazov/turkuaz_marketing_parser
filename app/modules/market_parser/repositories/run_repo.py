@@ -32,7 +32,7 @@ class RunRepository:
     def has_active_run(self, source_id: int) -> bool:
         result = self.db.execute(
             select(ParserRun.id)
-            .where(ParserRun.source_id == source_id, ParserRun.status.in_(("pending", "running")))
+            .where(ParserRun.source_id == source_id, ParserRun.status.in_(("pending", "running", "stopping")))
             .limit(1)
         )
         return result.scalar_one_or_none() is not None
@@ -88,6 +88,31 @@ class RunRepository:
         self.db.flush()
         return item
 
+    def finish_unfinished_categories(
+        self,
+        run_id: int,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        result = self.db.execute(
+            select(ParserRunCategory).where(
+                ParserRunCategory.run_id == run_id,
+                ParserRunCategory.status.in_(("pending", "running")),
+            )
+        )
+        for item in result.scalars().all():
+            item.status = status
+            item.error_message = error_message
+            item.finished_at = datetime.now(timezone.utc)
+        self.db.flush()
+
+    def request_stop(self, run: ParserRun, message: str | None = None) -> ParserRun:
+        run.status = "stopping"
+        if message:
+            run.error_message = append_error_message(run.error_message, message)
+        self.db.flush()
+        return run
+
     def finish_run(
         self,
         run: ParserRun,
@@ -120,3 +145,11 @@ class RunRepository:
         run.error_message = error_message
         self.db.flush()
         return run
+
+
+def append_error_message(current: str | None, message: str) -> str:
+    if not current:
+        return message
+    if message in current.splitlines():
+        return current
+    return f"{current}\n{message}"

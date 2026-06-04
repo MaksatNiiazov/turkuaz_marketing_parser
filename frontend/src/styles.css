@@ -157,6 +157,11 @@
   color: var(--text);
 }
 
+.danger-button {
+  border-color: color-mix(in srgb, var(--red) 28%, var(--border));
+  color: var(--red);
+}
+
 .secondary-button {
   border: 1px solid var(--border);
   background: var(--surface-raised);

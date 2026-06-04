@@ -21,6 +21,7 @@ import {
   loginAsDevAdmin,
   setCategoryEnabled,
   startRun,
+  stopRun,
   syncCategories,
 } from './lib/api';
 import type {
@@ -244,6 +245,18 @@ export function App() {
     }
   }
 
+  async function handleStopRun(runId: number) {
+    setActionState({ loading: true, error: null });
+    try {
+      const run = await stopRun(runId);
+      setRuns((rows) => [run, ...rows.filter((item) => item.id !== run.id)]);
+      setActiveRunId(run.id);
+      setActionState({ loading: false, error: null });
+    } catch (error) {
+      setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   async function loadProducts() {
     setActionState({ loading: true, error: null });
     try {
@@ -404,12 +417,15 @@ export function App() {
           onSelectCategories={setSelectedCategoryIds}
           onSync={() => void handleSyncCategories()}
           onRun={() => void handleStartRun()}
+          onStopRun={(runId) => void handleStopRun(runId)}
           onToggleParseAll={setParseAllEnabled}
           onToggleCategory={(category, enabled) => void handleToggleCategory(category, enabled)}
         />
       ) : null}
 
-      {view === 'runs' ? <RunsView runs={runs} /> : null}
+      {view === 'runs' ? (
+        <RunsView runs={runs} loading={actionState.loading} onStopRun={(runId) => void handleStopRun(runId)} />
+      ) : null}
 
       {view === 'products' ? (
         <ProductsView
@@ -575,6 +591,7 @@ function CategoriesView({
   onSelectCategories,
   onSync,
   onRun,
+  onStopRun,
   onToggleParseAll,
   onToggleCategory,
 }: {
@@ -587,6 +604,7 @@ function CategoriesView({
   onSelectCategories: (ids: number[]) => void;
   onSync: () => void;
   onRun: () => void;
+  onStopRun: (runId: number) => void;
   onToggleParseAll: (value: boolean) => void;
   onToggleCategory: (category: ParserCategory, enabled: boolean) => void;
 }) {
@@ -719,6 +737,11 @@ function CategoriesView({
               <Icon name="activity" size={15} />
               Запустить парсинг
             </button>
+            {latestRun && isRunActive(latestRun) ? (
+              <button className="text-button danger-button" type="button" disabled={loading} onClick={() => onStopRun(latestRun.id)}>
+                Остановить
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -767,6 +790,11 @@ function CategoriesView({
               <Detail label="Категории" value={`${latestRun.processed_categories}/${latestRun.total_categories}`} />
               <Detail label="Товары" value={latestRun.saved_products} />
               <Detail label="Ошибки" value={<RunErrorSummary message={latestRun.error_message} compact />} />
+              {isRunActive(latestRun) ? (
+                <button className="text-button danger-button" type="button" disabled={loading} onClick={() => onStopRun(latestRun.id)}>
+                  Остановить парсинг
+                </button>
+              ) : null}
             </div>
           ) : (
             <div className="empty-state">После первого запуска здесь появится короткая сводка.</div>
@@ -777,7 +805,15 @@ function CategoriesView({
   );
 }
 
-function RunsView({ runs }: { runs: ParserRun[] }) {
+function RunsView({
+  runs,
+  loading,
+  onStopRun,
+}: {
+  runs: ParserRun[];
+  loading: boolean;
+  onStopRun: (runId: number) => void;
+}) {
   return (
     <section className="panel table-panel">
       <div className="panel-header">
@@ -798,6 +834,7 @@ function RunsView({ runs }: { runs: ParserRun[] }) {
               <th>Прогресс</th>
               <th>Товары</th>
               <th>Ошибка</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -811,6 +848,15 @@ function RunsView({ runs }: { runs: ParserRun[] }) {
                 <td><RunProgress run={run} compact /></td>
                 <td>{run.saved_products}/{run.total_products}</td>
                 <td className="error-cell"><RunErrorSummary message={run.error_message} /></td>
+                <td>
+                  {isRunActive(run) ? (
+                    <button className="text-button danger-button compact-button" type="button" disabled={loading} onClick={() => onStopRun(run.id)}>
+                      Остановить
+                    </button>
+                  ) : (
+                    <span className="muted-action">-</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -825,7 +871,7 @@ function RunProgress({ run, compact = false }: { run: ParserRun; compact?: boole
   return (
     <div className={compact ? 'run-progress compact' : 'run-progress'}>
       <div className="progress-meta">
-        <span>{run.status === 'running' ? 'Идет сбор' : run.status}</span>
+        <span>{statusLabel(run.status)}</span>
         <strong>{value}%</strong>
       </div>
       <div className="progress-track" aria-label="Прогресс парсинга">
@@ -1380,7 +1426,7 @@ function cleanupErrorText(value: string): string {
 
 function StatusBadge({ value }: { value: string }) {
   const tone = statusTone(value);
-  return <span className={`status ${tone}`}>{value}</span>;
+  return <span className={`status ${tone}`}>{statusLabel(value)}</span>;
 }
 
 function statusTone(value: string): string {
@@ -1390,13 +1436,43 @@ function statusTone(value: string): string {
       return 'good';
     case 'partial':
     case 'running':
+    case 'stopping':
     case 'pending':
       return 'wait';
+    case 'stopped':
+      return 'muted';
     case 'failed':
     case 'disabled':
       return 'bad';
     default:
       return 'muted';
+  }
+}
+
+function statusLabel(value: string): string {
+  switch (value) {
+    case 'running':
+      return 'Идет сбор';
+    case 'pending':
+      return 'Ожидает';
+    case 'stopping':
+      return 'Останавливается';
+    case 'stopped':
+      return 'Остановлен';
+    case 'success':
+      return 'Готово';
+    case 'partial':
+      return 'Частично';
+    case 'failed':
+      return 'Ошибка';
+    case 'enabled':
+      return 'Включен';
+    case 'disabled':
+      return 'Выключен';
+    case 'group':
+      return 'Группа';
+    default:
+      return value;
   }
 }
 
@@ -1420,7 +1496,7 @@ function filterCategoryTree(categories: ParserCategory[], query: string): Parser
 }
 
 function isRunActive(run: ParserRun): boolean {
-  return run.status === 'pending' || run.status === 'running';
+  return run.status === 'pending' || run.status === 'running' || run.status === 'stopping';
 }
 
 function isAuthError(message: string): boolean {

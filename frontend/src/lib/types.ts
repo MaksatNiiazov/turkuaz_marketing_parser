@@ -24,7 +24,7 @@ export type ParserCategory = {
 export type ParserRun = {
   id: number;
   source_id: number;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'partial' | string;
+  status: 'pending' | 'running' | 'stopping' | 'stopped' | 'success' | 'failed' | 'partial' | string;
   started_at: string | null;
   finished_at: string | null;
   total_categories: number;
