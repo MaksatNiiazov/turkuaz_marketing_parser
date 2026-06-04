@@ -41,6 +41,7 @@ export type MarketProduct = {
   source_id: number;
   category_id: number | null;
   external_sku: string;
+  sku: string | null;
   name: string;
   unit: string | null;
   image_url: string | null;

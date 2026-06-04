@@ -33,6 +33,7 @@ class SnapshotService:
             source_id=source_id,
             category_id=category_id,
             external_sku=external_sku,
+            sku=parsed.sku,
             name=parsed.name,
             unit=parsed.unit,
             image_url=parsed.image_url,
@@ -51,4 +52,3 @@ class SnapshotService:
             raw_data=parsed.raw_data,
             collected_at=seen_at,
         )
-

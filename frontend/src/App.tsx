@@ -784,7 +784,7 @@ function CategoriesView({
               <Detail label="Статус" value={<StatusBadge value={latestRun.status} />} />
               <Detail label="Категории" value={`${latestRun.processed_categories}/${latestRun.total_categories}`} />
               <Detail label="Товары" value={latestRun.saved_products} />
-              <Detail label="Ошибки" value={latestRun.error_message || '-'} />
+              <Detail label="Ошибки" value={<RunErrorSummary message={latestRun.error_message} compact />} />
             </div>
           ) : (
             <div className="empty-state">После первого запуска здесь появится короткая сводка.</div>
@@ -828,7 +828,7 @@ function RunsView({ runs }: { runs: ParserRun[] }) {
                 <td>{run.processed_categories}/{run.total_categories}</td>
                 <td><RunProgress run={run} compact /></td>
                 <td>{run.saved_products}/{run.total_products}</td>
-                <td className="error-cell">{run.error_message || '-'}</td>
+                <td className="error-cell"><RunErrorSummary message={run.error_message} /></td>
               </tr>
             ))}
           </tbody>
@@ -854,6 +854,46 @@ function RunProgress({ run, compact = false }: { run: ParserRun; compact?: boole
           Категории: {run.processed_categories}/{run.total_categories || 0}.
           {' '}Сохранено товаров: {run.saved_products.toLocaleString('ru-RU')}.
         </small>
+      ) : null}
+    </div>
+  );
+}
+
+type RunErrorItem = {
+  category: string;
+  message: string;
+  url: string | null;
+};
+
+function RunErrorSummary({ message, compact = false }: { message: string | null; compact?: boolean }) {
+  const items = parseRunErrors(message);
+  if (!items.length) return <span className="muted-text">-</span>;
+
+  const first = items[0];
+  const hiddenCount = items.length - 1;
+  return (
+    <div className={compact ? 'run-errors compact' : 'run-errors'}>
+      <div className="run-error-head">
+        <span className="error-pill">{items.length === 1 ? '1 ошибка' : `${items.length} ошибок`}</span>
+        <span className="run-error-preview">
+          {first.category}: {first.message}
+          {hiddenCount > 0 ? ` + еще ${hiddenCount}` : ''}
+        </span>
+      </div>
+      {!compact ? (
+        <details className="run-error-details">
+          <summary>Детали</summary>
+          <ul className="run-error-list">
+            {items.slice(0, 20).map((item, index) => (
+              <li key={`${item.category}-${index}`}>
+                <strong>{item.category}</strong>
+                <span>{item.message}</span>
+                {item.url ? <a href={item.url} target="_blank" rel="noreferrer">URL</a> : null}
+              </li>
+            ))}
+          </ul>
+          {items.length > 20 ? <small>Показаны первые 20 из {items.length}.</small> : null}
+        </details>
       ) : null}
     </div>
   );
@@ -937,7 +977,7 @@ function ProductsView({
                   key={product.id}
                   onClick={() => onSelectProduct(product.id)}
                 >
-                  <td><code>{product.external_sku}</code></td>
+                  <td><code>{product.sku || product.external_sku}</code></td>
                   <td>
                     <div className="product-cell">
                       {product.image_url ? <img src={product.image_url} alt="" /> : <span className="image-fallback" />}
@@ -1096,7 +1136,7 @@ function ProductDetail({
         <div className="panel-header compact">
           <div>
             <h2>Карточка товара</h2>
-            <p>{product?.external_sku || 'Выберите товар'}</p>
+            <p>{product ? product.sku || product.external_sku : 'Выберите товар'}</p>
           </div>
         </div>
         {product ? (
@@ -1106,6 +1146,8 @@ function ProductDetail({
               <strong>{product.name}</strong>
             </div>
             <div className="detail-list">
+              <Detail label="SKU" value={<code>{product.sku || '-'}</code>} />
+              <Detail label="External ID" value={<code>{product.external_sku}</code>} />
               <Detail label="Текущая цена" value={money(stats?.current_price)} />
               <Detail label="Мин. цена" value={money(stats?.min_price)} />
               <Detail label="Макс. цена" value={money(stats?.max_price)} />
@@ -1303,6 +1345,53 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function parseRunErrors(message: string | null): RunErrorItem[] {
+  if (!message) return [];
+  return message
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(parseRunErrorLine);
+}
+
+function parseRunErrorLine(line: string): RunErrorItem {
+  const separatorIndex = line.indexOf(':');
+  const category = separatorIndex > 0 ? line.slice(0, separatorIndex).trim() : 'Категория';
+  const rawMessage = separatorIndex > 0 ? line.slice(separatorIndex + 1).trim() : line;
+  const statusMatch = rawMessage.match(/Client error ['"]?(\d{3})(?:\s+([^'"]+))?/i);
+  const url = rawMessage.match(/url ['"]([^'"]+)['"]/i)?.[1] ?? null;
+
+  if (statusMatch) {
+    return {
+      category,
+      message: humanHttpError(Number(statusMatch[1])),
+      url,
+    };
+  }
+
+  return {
+    category,
+    message: cleanupErrorText(rawMessage),
+    url,
+  };
+}
+
+function humanHttpError(statusCode: number): string {
+  if (statusCode === 404) return 'Раздел не найден на Globus (404)';
+  if (statusCode === 403) return 'Globus запретил доступ к разделу (403)';
+  if (statusCode === 429) return 'Globus ограничил частоту запросов (429)';
+  if (statusCode >= 500) return `Globus временно недоступен (HTTP ${statusCode})`;
+  return `Globus вернул HTTP ${statusCode}`;
+}
+
+function cleanupErrorText(value: string): string {
+  return value
+    .replace(/For more information check:.*/i, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Ошибка парсинга';
 }
 
 function StatusBadge({ value }: { value: string }) {

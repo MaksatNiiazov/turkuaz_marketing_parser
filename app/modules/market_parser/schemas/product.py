@@ -9,6 +9,7 @@ class ProductRead(BaseModel):
     source_id: int
     category_id: int | None
     external_sku: str
+    sku: str | None
     name: str
     unit: str | None
     image_url: str | None
@@ -37,4 +38,3 @@ class SnapshotRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-

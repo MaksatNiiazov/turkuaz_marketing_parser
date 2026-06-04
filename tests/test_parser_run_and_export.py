@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+import httpx
 from openpyxl import load_workbook
 
 from app.modules.market_parser.models.entities import ParserCategory, ParserSource
@@ -10,6 +11,7 @@ from app.modules.market_parser.schemas.run import RunCreate
 from app.modules.market_parser.services.export_service import ExportService
 from app.modules.market_parser.services.globus_parser import ParsedProduct
 from app.modules.market_parser.services.parser_service import ParserService
+from app.modules.market_parser.services.parser_service import summarize_parser_error
 from app.modules.market_parser.services.snapshot_service import SnapshotService
 
 
@@ -23,7 +25,8 @@ class FakeParser:
         return [
             ParsedProduct(
                 source_code="globus",
-                external_sku=f"sku-{category.id}",
+                external_sku=f"external-{category.id}",
+                sku=f"sku-{category.id}",
                 name=f"Product {category.id}",
                 unit="шт.",
                 category_name=category.name,
@@ -49,6 +52,14 @@ def seed_source_categories(db_session):
     db_session.flush()
     db_session.commit()
     return source, good, bad
+
+
+def test_summarize_globus_http_error() -> None:
+    request = httpx.Request("GET", "https://globus-online.kg/ru-kg/catalog/grocery/category/missing")
+    response = httpx.Response(404, request=request)
+    error = httpx.HTTPStatusError("Client error", request=request, response=response)
+
+    assert summarize_parser_error(error) == "Globus вернул 404: раздел не найден или больше недоступен"
 
 
 @pytest.mark.asyncio
@@ -92,7 +103,8 @@ def test_export_xlsx(db_session) -> None:
         run_id=None,
         parsed=ParsedProduct(
             source_code="globus",
-            external_sku="sku-1",
+            external_sku="external-1",
+            sku="Ц0180022",
             name="Шоколад",
             unit="шт.",
             category_name=category.name,
@@ -101,9 +113,9 @@ def test_export_xlsx(db_session) -> None:
             discount_price=Decimal("80.00"),
             discount_percent=Decimal("20.00"),
             image_url="https://img",
-            product_url="https://globus-online.kg/ru-kg/good/sku-1",
+            product_url="https://globus-online.kg/ru-kg/good/external-1",
             is_available=True,
-            raw_data={"id": "sku-1"},
+            raw_data={"id": "external-1", "pigeonId": "Ц0180022"},
         ),
         collected_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
     )
@@ -114,6 +126,7 @@ def test_export_xlsx(db_session) -> None:
 
     assert "Дом и Уют" in workbook.sheetnames
     assert workbook["Товары"]["A1"].value == "sku"
+    assert workbook["Товары"]["A2"].value == "Ц0180022"
     assert workbook["Товары"]["D2"].value == "Дом и Уют"
     assert workbook["Товары"]["E2"].value == "Для кухни"
     assert workbook["Скидки"]["C2"].value == "Шоколад"

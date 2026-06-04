@@ -71,9 +71,10 @@ class ExportService:
         )
         for product in products:
             snapshot = latest.get(product.id)
+            product_sku = export_sku(product)
             parent_name, category_name = category_names(product)
             row = [
-                product.external_sku,
+                product_sku,
                 product.name,
                 product.unit,
                 parent_name,
@@ -94,7 +95,7 @@ class ExportService:
                 ws_prices.append(
                     [
                         snapshot.collected_at,
-                        product.external_sku,
+                        export_sku(product),
                         product.name,
                         snapshot.price,
                         snapshot.discount_price,
@@ -105,7 +106,7 @@ class ExportService:
                     ws_discounts.append(
                         [
                             snapshot.collected_at,
-                            product.external_sku,
+                            export_sku(product),
                             product.name,
                             snapshot.price,
                             snapshot.discount_price,
@@ -134,7 +135,7 @@ class ExportService:
         parent_name, category_name = category_names(product)
         return [
             product.source.code,
-            product.external_sku,
+            export_sku(product),
             product.name,
             product.unit,
             parent_name,
@@ -221,6 +222,10 @@ def category_names(product) -> tuple[str | None, str | None]:
     if category.parent is not None:
         return category.parent.name, category.name
     return category.name, category.name
+
+
+def export_sku(product) -> str:
+    return product.sku or product.external_sku
 
 
 def unique_sheet_title(wb: Workbook, value: str) -> str:

@@ -4,6 +4,7 @@ import logging
 import asyncio
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -175,7 +176,7 @@ class ParserService:
                 )
             except Exception as exc:  # noqa: BLE001
                 processed += 1
-                message = str(exc)
+                message = summarize_parser_error(exc)
                 errors.append(f"{result.category_name}: {message}")
                 self.db.rollback()
                 run = self.runs.get(run.id)
@@ -257,3 +258,23 @@ class ParserService:
         selected_leaf = [category for category in selected if not self.categories.has_children(category.id)]
         merged = {category.id: category for category in selected_leaf + child_categories}
         return list(merged.values())
+
+
+def summarize_parser_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code == 404:
+            return "Globus вернул 404: раздел не найден или больше недоступен"
+        if status_code == 403:
+            return "Globus запретил доступ к разделу (403)"
+        if status_code == 429:
+            return "Globus ограничил частоту запросов (429), нужно повторить позже"
+        if status_code >= 500:
+            return f"Globus временно недоступен (HTTP {status_code})"
+        return f"Globus вернул HTTP {status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "Globus не ответил вовремя, нужно повторить запуск позже"
+    if isinstance(exc, httpx.TransportError):
+        return "Не удалось подключиться к Globus"
+    message = str(exc).strip()
+    return message or exc.__class__.__name__

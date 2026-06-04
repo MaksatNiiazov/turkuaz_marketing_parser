@@ -23,10 +23,11 @@ def seed_source_category(db_session):
     return source, category
 
 
-def parsed_product(price="100.00", discount_price=None, sku="sku-1"):
+def parsed_product(price="100.00", discount_price=None, external_sku="external-1", sku="sku-1"):
     return ParsedProduct(
         source_code="globus",
-        external_sku=sku,
+        external_sku=external_sku,
+        sku=sku,
         name="Шоколад тестовый",
         unit="шт.",
         category_name="Конфеты",
@@ -35,9 +36,9 @@ def parsed_product(price="100.00", discount_price=None, sku="sku-1"):
         discount_price=Decimal(discount_price) if discount_price else None,
         discount_percent=Decimal("20.00") if discount_price else None,
         image_url="https://img",
-        product_url="https://globus-online.kg/ru-kg/good/sku-1",
+        product_url="https://globus-online.kg/ru-kg/good/external-1",
         is_available=True,
-        raw_data={"id": sku},
+        raw_data={"id": external_sku, "pigeonId": sku},
     )
 
 
@@ -63,7 +64,37 @@ def test_create_update_product_and_snapshot(db_session) -> None:
 
     products = ProductRepository(db_session).list()
     assert len(products) == 1
+    assert products[0].external_sku == "external-1"
+    assert products[0].sku == "sku-1"
     assert products[0].last_seen_at.date().isoformat() == "2026-05-29"
+    assert len(products[0].snapshots) == 2
+    assert ProductRepository(db_session).list(sku="sku-1")[0].id == products[0].id
+    assert ProductRepository(db_session).list(sku="external-1")[0].id == products[0].id
+
+
+def test_upsert_reuses_short_sku_product_by_url(db_session) -> None:
+    source, category = seed_source_category(db_session)
+    service = SnapshotService(db_session)
+    service.save_product_snapshot(
+        source_id=source.id,
+        category_id=category.id,
+        run_id=None,
+        parsed=parsed_product(external_sku="sku-1", sku="sku-1"),
+        collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+    )
+    service.save_product_snapshot(
+        source_id=source.id,
+        category_id=category.id,
+        run_id=None,
+        parsed=parsed_product(external_sku="external-1", sku=None),
+        collected_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    products = ProductRepository(db_session).list()
+    assert len(products) == 1
+    assert products[0].external_sku == "external-1"
+    assert products[0].sku == "sku-1"
     assert len(products[0].snapshots) == 2
 
 

@@ -34,6 +34,7 @@ class ParsedCategory:
 class ParsedProduct:
     source_code: str
     external_sku: str | None
+    sku: str | None
     name: str
     unit: str | None
     category_name: str | None
@@ -148,9 +149,10 @@ class GlobusParser(BaseMarketParser):
         product_url = (
             urljoin(self.base_url, f"/ru-kg/good/{product_id}") if product_id else None
         )
-        external_sku = self._sku_from_item(item) or product_id or stable_product_hash(
+        external_sku = product_id or stable_product_hash(
             product_url, title, category.name if category else None
         )
+        sku = self._sku_from_item(item)
         current_price = to_decimal(item.get("currentPrice") or item.get("price"))
         old_price = to_decimal(item.get("oldPrice"))
         discount_price = current_price if old_price and current_price and current_price < old_price else None
@@ -162,6 +164,7 @@ class GlobusParser(BaseMarketParser):
         return ParsedProduct(
             source_code=self.source_code,
             external_sku=external_sku,
+            sku=sku,
             name=title,
             unit=unit,
             category_name=category.name if category else None,

@@ -705,9 +705,97 @@ code {
 }
 
 .error-cell {
-  max-width: 320px;
+  min-width: 260px;
+  max-width: 360px;
+  color: var(--text);
+  vertical-align: top;
+}
+
+.muted-text {
+  color: var(--muted);
+}
+
+.run-errors {
+  display: grid;
+  gap: 8px;
+  max-width: 360px;
+  line-height: 1.35;
+}
+
+.run-errors.compact {
+  max-width: none;
+}
+
+.run-error-head {
+  display: grid;
+  gap: 6px;
+}
+
+.error-pill {
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--red) 26%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--red) 10%, transparent);
   color: var(--red);
-  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 3px 8px;
+}
+
+.run-error-preview {
+  display: -webkit-box;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: break-word;
+}
+
+.run-error-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--teal-strong);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.run-error-list {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  margin: 8px 0 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.run-error-list li {
+  display: grid;
+  gap: 3px;
+  border-left: 3px solid color-mix(in srgb, var(--red) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+  padding: 7px 9px;
+}
+
+.run-error-list strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.run-error-list span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+
+.run-error-list a,
+.run-error-details small {
+  color: var(--teal-strong);
+  font-size: 12px;
+  font-weight: 850;
 }
 
 @media (max-width: 1100px) {

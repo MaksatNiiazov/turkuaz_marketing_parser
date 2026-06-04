@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -87,12 +87,16 @@ class ParserRunCategory(Base):
 
 class MarketProduct(CreatedUpdatedMixin, Base):
     __tablename__ = "market_products"
-    __table_args__ = (UniqueConstraint("source_id", "external_sku", name="uq_market_products_source_sku"),)
+    __table_args__ = (
+        UniqueConstraint("source_id", "external_sku", name="uq_market_products_source_sku"),
+        Index("ix_market_products_source_short_sku", "source_id", "sku"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("parser_sources.id"), nullable=False)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("parser_categories.id"), nullable=True)
     external_sku: Mapped[str] = mapped_column(String(255), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     unit: Mapped[str | None] = mapped_column(String(80), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)

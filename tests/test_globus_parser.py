@@ -34,7 +34,8 @@ def test_normalize_product_and_discount_percent() -> None:
     )
 
     assert parsed is not None
-    assert parsed.external_sku == "Ц0180022"
+    assert parsed.external_sku == "internal-product-id"
+    assert parsed.sku == "Ц0180022"
     assert parsed.name == "Шоколад тестовый 100г"
     assert parsed.unit == "шт."
     assert parsed.price == Decimal("100.00")
@@ -87,7 +88,8 @@ async def test_fetch_products_enriches_sku_from_product_detail(monkeypatch) -> N
     products = await parser.fetch_products_by_category(category)
 
     assert len(products) == 1
-    assert products[0].external_sku == "Ц0180022"
+    assert products[0].external_sku == "internal-product-id"
+    assert products[0].sku == "Ц0180022"
     assert products[0].product_url == "https://globus-online.kg/ru-kg/good/internal-product-id"
 
 
@@ -128,7 +130,8 @@ async def test_fetch_products_skips_detail_when_sku_is_present(monkeypatch) -> N
     products = await parser.fetch_products_by_category(category)
 
     assert len(products) == 1
-    assert products[0].external_sku == "Ц0180022"
+    assert products[0].external_sku == "internal-product-id"
+    assert products[0].sku == "Ц0180022"
 
 
 def test_discount_percent_empty_when_no_discount() -> None:
