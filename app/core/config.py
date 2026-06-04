@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     parser_product_detail_request_delay_ms: int = 300
     parser_product_detail_concurrency: int = 4
     parser_concurrency: int = 2
+    parser_auto_run_enabled: bool = False
+    parser_auto_run_interval_days: int = 5
+    parser_auto_run_source_code: str = "globus"
+    parser_auto_run_check_interval_seconds: int = 3600
+    parser_auto_run_startup_delay_seconds: int = 30
     parser_user_agent: str = (
         "Mozilla/5.0 (compatible; MarketingParser/0.1; +https://globus-online.kg)"
     )

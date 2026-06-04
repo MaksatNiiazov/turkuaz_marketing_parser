@@ -20,6 +20,23 @@ class RunRepository:
         result = self.db.execute(stmt)
         return list(result.scalars().all())
 
+    def latest_for_source(self, source_id: int) -> ParserRun | None:
+        result = self.db.execute(
+            select(ParserRun)
+            .where(ParserRun.source_id == source_id)
+            .order_by(ParserRun.created_at.desc(), ParserRun.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    def has_active_run(self, source_id: int) -> bool:
+        result = self.db.execute(
+            select(ParserRun.id)
+            .where(ParserRun.source_id == source_id, ParserRun.status.in_(("pending", "running")))
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     def get(self, run_id: int) -> ParserRun | None:
         result = self.db.execute(
             select(ParserRun).options(selectinload(ParserRun.categories)).where(ParserRun.id == run_id)

@@ -39,6 +39,21 @@ http://localhost:7503
 SQLite data is stored in the `marketing_parser_data` Docker volume. Migrations run automatically
 before the API starts.
 
+## Automatic Parser Runs
+
+The backend can start parser runs on a fixed interval without frontend interaction. Enable it on
+the server with environment variables:
+
+```text
+PARSER_AUTO_RUN_ENABLED=true
+PARSER_AUTO_RUN_INTERVAL_DAYS=5
+PARSER_AUTO_RUN_SOURCE_CODE=globus
+```
+
+The scheduler runs with `parse_all_enabled=true`, records runs as `created_by=scheduler`, skips
+startup if a parser run is already `pending` or `running`, and waits until the configured interval
+has elapsed since the latest run for that source.
+
 ## Run On Windows Server Without Docker
 
 When the frontend is opened from another computer, do not put `localhost` in browser-facing

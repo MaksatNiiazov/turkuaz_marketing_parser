@@ -1,4 +1,6 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI
@@ -9,6 +11,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
+from app.modules.market_parser.services.auto_run_scheduler import AutoRunScheduler
 from app.modules.market_parser.services.bootstrap import bootstrap_market_parser
 
 
@@ -23,10 +26,23 @@ def bootstrap_app() -> None:
 
 bootstrap_app()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    scheduler = AutoRunScheduler()
+    scheduler.start()
+    app.state.auto_run_scheduler = scheduler
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
