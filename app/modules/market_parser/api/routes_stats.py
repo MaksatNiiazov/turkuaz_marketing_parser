@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_permission
 from app.db.session import get_db
-from app.modules.market_parser.schemas.stats import CategoryStats, PriceChangeItem, ProductDiscountItem, ProductStats
+from app.modules.market_parser.schemas.stats import (
+    CategoryStats,
+    PriceChangeItem,
+    ProductDiscountItem,
+    ProductDiscountPage,
+    ProductStats,
+)
 from app.modules.market_parser.services.stats_service import StatsService
 
 router = APIRouter()
@@ -56,12 +62,14 @@ def discounts(
     return StatsService(db).top_discounts(from_date, to_date, category_id=category_id)
 
 
-@router.get("/reports/top-discounts", response_model=list[ProductDiscountItem])
+@router.get("/reports/top-discounts", response_model=ProductDiscountPage)
 def top_discounts(
     category_id: int | None = None,
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=250)] = 25,
+    offset: Annotated[int, Query(ge=0)] = 0,
     db: Session = Depends(get_db),
     _claims: dict = Depends(require_permission("market_parser.stats.read")),
 ):
-    return StatsService(db).top_discounts(from_date, to_date, category_id=category_id)
+    return StatsService(db).discount_page(from_date, to_date, category_id=category_id, limit=limit, offset=offset)

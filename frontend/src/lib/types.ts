@@ -57,6 +57,18 @@ export type ProductSummary = {
   count: number;
 };
 
+export type ProductCategorySegment = {
+  category_id: number | null;
+  label: string;
+  count: number;
+  percent: number;
+};
+
+export type ProductCategorySegments = {
+  items: ProductCategorySegment[];
+  total: number;
+};
+
 export type ProductPage = {
   items: MarketProduct[];
   total: number;
@@ -100,6 +112,13 @@ export type ProductDiscountItem = {
   discount_percent: string | number | null;
   discount_price: string | number | null;
   price: string | number | null;
+};
+
+export type ProductDiscountPage = {
+  items: ProductDiscountItem[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 export type PriceChangeItem = {

@@ -10,14 +10,17 @@ import {
   fetchCategories,
   fetchCategoryStats,
   fetchMe,
+  fetchProductCategorySegments,
   fetchRun,
   fetchProductSnapshots,
   fetchProductStats,
   fetchProductPage,
   fetchProductSummary,
   fetchPriceChanges,
+  fetchProducts,
   fetchRuns,
   fetchSources,
+  fetchTopDiscounts,
   getToken,
   login,
   loginAsDevAdmin,
@@ -34,6 +37,8 @@ import type {
   ParserRun,
   ParserSource,
   PriceChangeItem,
+  ProductCategorySegment,
+  ProductDiscountItem,
   ProductSnapshot,
   ProductStats,
 } from './lib/types';
@@ -75,6 +80,7 @@ export function App() {
   const [runs, setRuns] = useState<ParserRun[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [productCount, setProductCount] = useState(0);
+  const [productSegments, setProductSegments] = useState<ProductCategorySegment[]>([]);
   const [productTotal, setProductTotal] = useState(0);
   const [productPage, setProductPage] = useState(1);
   const [productPageSize, setProductPageSize] = useState(50);
@@ -84,12 +90,14 @@ export function App() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [selectedProductRecord, setSelectedProductRecord] = useState<MarketProduct | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [productStats, setProductStats] = useState<ProductStats | null>(null);
   const [categoryStats, setCategoryStats] = useState<CategoryStats | null>(null);
   const [snapshots, setSnapshots] = useState<ProductSnapshot[]>([]);
   const [state, setState] = useState<LoadState>({ loading: false, error: null });
   const [actionState, setActionState] = useState<LoadState>({ loading: false, error: null });
+  const [exportState, setExportState] = useState<LoadState>({ loading: false, error: null });
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<ProductFilters>(initialProductFilters);
   const [parseAllEnabled, setParseAllEnabled] = useState(true);
@@ -98,7 +106,10 @@ export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
 
   const selectedSource = sources.find((source) => source.id === selectedSourceId) ?? sources[0] ?? null;
-  const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0] ?? null;
+  const selectedProduct =
+    selectedProductRecord && selectedProductRecord.id === selectedProductId
+      ? selectedProductRecord
+      : products.find((product) => product.id === selectedProductId) ?? products[0] ?? null;
   const parentCategoryIds = new Set(categories.map((category) => category.parent_id).filter(Boolean));
   const enabledCategories = categories.filter((category) => category.is_enabled && !parentCategoryIds.has(category.id));
   const latestRun = runs[0] ?? null;
@@ -118,10 +129,11 @@ export function App() {
       ]);
       const sourceRows = await fetchSources();
       const sourceId = selectedSourceId ?? sourceRows[0]?.id ?? null;
-      const [categoryRows, runRows, productSummary] = await Promise.all([
+      const [categoryRows, runRows, productSummary, segmentSummary] = await Promise.all([
         sourceId ? fetchCategories(sourceId) : Promise.resolve([]),
         sourceId ? fetchRuns(sourceId) : Promise.resolve([]),
         fetchProductSummary(sourceId ?? undefined),
+        fetchProductCategorySegments(sourceId ?? undefined),
       ]);
       setCurrentUser(me);
       setServiceApps(serviceRows);
@@ -132,6 +144,7 @@ export function App() {
       setRuns(runRows);
       setProducts([]);
       setProductCount(productSummary.count);
+      setProductSegments(segmentSummary.items);
       setProductTotal(productSummary.count);
       setProductPage(1);
       setProductLoadVersion((version) => version + 1);
@@ -141,6 +154,7 @@ export function App() {
           : categoryRows[0]?.id ?? null,
       );
       setSelectedProductId(null);
+      setSelectedProductRecord(null);
       setState({ loading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -275,15 +289,19 @@ export function App() {
   }
 
   async function handleExportRun(runId: number) {
-    setActionState({ loading: true, error: null });
+    await handleDownloadExcel(
+      `/api/v1/market-parser/export/products.xlsx?run_id=${runId}`,
+      `market_run_${runId}.xlsx`,
+    );
+  }
+
+  async function handleDownloadExcel(path: string, filename: string) {
+    setExportState({ loading: true, error: null });
     try {
-      await downloadFile(
-        `/api/v1/market-parser/export/products.xlsx?run_id=${runId}`,
-        `market_run_${runId}.xlsx`,
-      );
-      setActionState({ loading: false, error: null });
+      await downloadFile(path, filename);
+      setExportState({ loading: false, error: null });
     } catch (error) {
-      setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      setExportState({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -307,9 +325,12 @@ export function App() {
       const rows = pageData.items;
       setProducts(rows);
       setProductTotal(pageData.total);
-      setSelectedProductId((current) =>
-        current && rows.some((product) => product.id === current) ? current : rows[0]?.id ?? null,
-      );
+      setSelectedProductId((current) => {
+        const selected = current ? rows.find((product) => product.id === current) : null;
+        const next = selected ?? rows[0] ?? null;
+        setSelectedProductRecord(next);
+        return next?.id ?? null;
+      });
       setActionState({ loading: false, error: null });
       setProductsLoading(false);
     } catch (error) {
@@ -320,8 +341,12 @@ export function App() {
 
   async function refreshProductSummary() {
     try {
-      const summary = await fetchProductSummary(selectedSource?.id);
+      const [summary, segmentSummary] = await Promise.all([
+        fetchProductSummary(selectedSource?.id),
+        fetchProductCategorySegments(selectedSource?.id),
+      ]);
       setProductCount(summary.count);
+      setProductSegments(segmentSummary.items);
     } catch (error) {
       setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
@@ -338,6 +363,7 @@ export function App() {
     setRuns([]);
     setProducts([]);
     setProductCount(0);
+    setProductSegments([]);
     setProductTotal(0);
     setProductPage(1);
     setProductPageSize(50);
@@ -346,6 +372,7 @@ export function App() {
     setSelectedCategoryIds([]);
     setActiveRunId(null);
     setSelectedProductId(null);
+    setSelectedProductRecord(null);
     setSelectedCategoryId(null);
     setProductStats(null);
     setCategoryStats(null);
@@ -447,9 +474,10 @@ export function App() {
       apiStatus={isConnectivityError(state.error || actionState.error) ? 'offline' : 'online'}
       footerLinks={[{ href: API_DOCS_URL, label: 'Swagger' }]}
     >
-      {state.error || actionState.error ? (
-        <div className="notice">{errorMessage(state.error || actionState.error)}</div>
+      {state.error || actionState.error || exportState.error ? (
+        <div className="notice">{errorMessage(state.error || actionState.error || exportState.error)}</div>
       ) : null}
+      <GlobalExportIndicator active={exportState.loading} />
 
       <section className="metrics-grid" aria-label="Market parser metrics">
         {metrics.map((metric) => (
@@ -511,7 +539,7 @@ export function App() {
             setProductPageSize(pageSize);
             setProductPage(1);
           }}
-          onSelectProduct={setSelectedProductId}
+          onSelectProduct={handleSelectProduct}
         />
       ) : null}
 
@@ -521,6 +549,7 @@ export function App() {
           products={products}
           runs={runs}
           productCount={productCount}
+          productSegments={productSegments}
           selectedCategoryId={selectedCategoryId}
           selectedProduct={selectedProduct}
           productStats={productStats}
@@ -530,7 +559,7 @@ export function App() {
           filters={filters}
           markedDateKeys={parsedDateKeys}
           onSelectCategory={setSelectedCategoryId}
-          onSelectProduct={setSelectedProductId}
+          onSelectProduct={handleSelectProduct}
           onFilterChange={setFilters}
         />
       ) : null}
@@ -541,11 +570,18 @@ export function App() {
           filters={filters}
           markedDateKeys={parsedDateKeys}
           selectedSourceId={selectedSourceId}
+          exportState={exportState}
           onFilterChange={setFilters}
+          onDownload={handleDownloadExcel}
         />
       ) : null}
     </AppShell>
   );
+
+  function handleSelectProduct(product: MarketProduct | null) {
+    setSelectedProductId(product?.id ?? null);
+    setSelectedProductRecord(product);
+  }
 }
 
 function LoginScreen({
@@ -667,24 +703,19 @@ function CategoryCheckbox({
 
 function MarketingDashboard({
   categories,
-  products,
   productCount,
-  runs,
+  productSegments,
   selectedCategory,
   categoryStats,
   latestRun,
 }: {
   categories: ParserCategory[];
-  products: MarketProduct[];
   productCount: number;
-  runs: ParserRun[];
+  productSegments: ProductCategorySegment[];
   selectedCategory: ParserCategory | null;
   categoryStats: CategoryStats | null;
   latestRun: ParserRun | null;
 }) {
-  const categorySegments = categoryProductSegments(categories, products);
-  const recentRuns = runs.slice(0, 8).reverse();
-  const maxRunProducts = Math.max(1, ...recentRuns.map((run) => run.saved_products));
   const leafCategoryIds = leafCategories(categories);
   const enabledLeafCount = categories.filter((category) => leafCategoryIds.has(category.id) && category.is_enabled).length;
   const enabledPercent = leafCategoryIds.size ? Math.round((enabledLeafCount / leafCategoryIds.size) * 100) : 0;
@@ -702,6 +733,17 @@ function MarketingDashboard({
     ? Math.round(((categoryStats?.price_increased_products ?? 0) / moversTotal) * 100)
     : 0;
   const focusName = selectedCategory?.name ?? 'Выбранная категория';
+  const focusProducts = categoryStats?.products_count ?? 0;
+  const discountedCount = categoryStats?.discounted_products_count ?? 0;
+  const availableCount = categoryStats?.available_products_count ?? 0;
+  const regularCount = Math.max(0, focusProducts - discountedCount);
+  const unavailableCount = Math.max(0, focusProducts - availableCount);
+  const focusSignals = [
+    { label: 'Со скидкой', value: discountedCount, total: focusProducts, tone: 'discount' },
+    { label: 'Без скидки', value: regularCount, total: focusProducts, tone: 'regular' },
+    { label: 'В наличии', value: availableCount, total: focusProducts, tone: 'available' },
+    { label: 'Нет в наличии', value: unavailableCount, total: focusProducts, tone: 'attention' },
+  ];
 
   return (
     <section className="marketing-dashboard">
@@ -721,24 +763,27 @@ function MarketingDashboard({
         </div>
       </div>
 
-      <div className="panel dashboard-panel run-chart-panel">
+      <div className="panel dashboard-panel signal-panel">
         <div className="mini-panel-head">
-          <h3>Динамика выгрузок</h3>
-          <span>последние запуски</span>
+          <h3>Сигналы категории</h3>
+          <span>{focusName}</span>
         </div>
-        <div className="run-bars" aria-label="Сохраненные товары по последним запускам">
-          {recentRuns.length ? recentRuns.map((run) => {
-            const height = Math.max(8, Math.round((run.saved_products / maxRunProducts) * 100));
+        <div className="signal-grid">
+          {focusSignals.map((item) => {
+            const width = item.total ? Math.round((item.value / item.total) * 100) : 0;
             return (
-              <div className="run-bar-item" key={run.id}>
-                <div className="run-bar-track">
-                  <span className={statusTone(run.status)} style={{ height: `${height}%` }} />
+              <div className={`signal-card ${item.tone}`} key={item.label}>
+                <div>
+                  <span>{item.label}</span>
+                  <strong>{item.value.toLocaleString('ru-RU')}</strong>
                 </div>
-                <strong>{run.saved_products.toLocaleString('ru-RU')}</strong>
-                <small>#{run.id}</small>
+                <div className="signal-track">
+                  <span style={{ width: `${width}%` }} />
+                </div>
+                <small>{width}% от выбранной категории</small>
               </div>
             );
-          }) : <div className="empty-state">После запусков появится тренд наполнения каталога.</div>}
+          })}
         </div>
       </div>
 
@@ -748,7 +793,7 @@ function MarketingDashboard({
           <span>топ категорий</span>
         </div>
         <div className="bar-list">
-          {categorySegments.length ? categorySegments.map((item) => (
+          {productSegments.length ? productSegments.map((item) => (
             <div className="bar-row" key={item.label}>
               <div>
                 <strong>{item.label}</strong>
@@ -1210,7 +1255,7 @@ function ProductsView({
   onApplyFilters: () => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
-  onSelectProduct: (id: number) => void;
+  onSelectProduct: (product: MarketProduct) => void;
 }) {
   const categoryById = new Map(categories.map((category) => [category.id, category]));
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -1265,7 +1310,7 @@ function ProductsView({
                 <tr
                   className={selectedProduct?.id === product.id ? 'selected-row' : ''}
                   key={product.id}
-                  onClick={() => onSelectProduct(product.id)}
+                  onClick={() => onSelectProduct(product)}
                 >
                   <td><code>{product.sku || '-'}</code></td>
                   <td><code>{product.external_sku}</code></td>
@@ -1606,6 +1651,7 @@ function ReportsView({
   products,
   runs,
   productCount,
+  productSegments,
   selectedCategoryId,
   selectedProduct,
   productStats,
@@ -1622,6 +1668,7 @@ function ReportsView({
   products: MarketProduct[];
   runs: ParserRun[];
   productCount: number;
+  productSegments: ProductCategorySegment[];
   selectedCategoryId: number | null;
   selectedProduct: MarketProduct | null;
   productStats: ProductStats | null;
@@ -1631,21 +1678,58 @@ function ReportsView({
   filters: ProductFilters;
   markedDateKeys: string[];
   onSelectCategory: (id: number) => void;
-  onSelectProduct: (id: number) => void;
+  onSelectProduct: (product: MarketProduct | null) => void;
   onFilterChange: (filters: ProductFilters) => void;
 }) {
-  const topDiscounts = categoryStats?.top_discounted_products ?? [];
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
+  const [reportProducts, setReportProducts] = useState<MarketProduct[]>([]);
+  const [reportProductsLoading, setReportProductsLoading] = useState(false);
+  const [topDiscounts, setTopDiscounts] = useState<ProductDiscountItem[]>([]);
+  const [topDiscountsTotal, setTopDiscountsTotal] = useState(0);
+  const [topDiscountsPage, setTopDiscountsPage] = useState(1);
+  const [topDiscountsPageSize, setTopDiscountsPageSize] = useState(25);
+  const [topDiscountsLoading, setTopDiscountsLoading] = useState(false);
   const [priceChanges, setPriceChanges] = useState<PriceChangeItem[]>([]);
   const [priceChangesLoading, setPriceChangesLoading] = useState(false);
+  const topDiscountsTotalPages = Math.max(1, Math.ceil(topDiscountsTotal / topDiscountsPageSize));
+  const topDiscountsCurrentPage = Math.min(topDiscountsPage, topDiscountsTotalPages);
+  const topDiscountsPageStart = topDiscountsTotal === 0 ? 0 : (topDiscountsCurrentPage - 1) * topDiscountsPageSize + 1;
+  const topDiscountsPageEnd = Math.min((topDiscountsCurrentPage - 1) * topDiscountsPageSize + topDiscounts.length, topDiscountsTotal);
   const priceIncreases = priceChanges
     .filter((item) => Number(item.change_percent ?? 0) > 0)
-    .sort((a, b) => Number(b.change_percent ?? 0) - Number(a.change_percent ?? 0))
-    .slice(0, 10);
+    .sort((a, b) => Number(b.change_percent ?? 0) - Number(a.change_percent ?? 0));
   const priceDecreases = priceChanges
     .filter((item) => Number(item.change_percent ?? 0) < 0)
-    .sort((a, b) => Number(a.change_percent ?? 0) - Number(b.change_percent ?? 0))
-    .slice(0, 10);
+    .sort((a, b) => Number(a.change_percent ?? 0) - Number(b.change_percent ?? 0));
+
+  useEffect(() => {
+    setTopDiscountsPage(1);
+  }, [selectedCategoryId, filters.from, filters.to]);
+
+  useEffect(() => {
+    if (!selectedCategoryId) {
+      setTopDiscounts([]);
+      setTopDiscountsTotal(0);
+      return;
+    }
+    setTopDiscountsLoading(true);
+    void fetchTopDiscounts({
+      category_id: selectedCategoryId,
+      from: filters.from || undefined,
+      to: filters.to || undefined,
+      limit: topDiscountsPageSize,
+      offset: (topDiscountsCurrentPage - 1) * topDiscountsPageSize,
+    })
+      .then((page) => {
+        setTopDiscounts(page.items);
+        setTopDiscountsTotal(page.total);
+      })
+      .catch(() => {
+        setTopDiscounts([]);
+        setTopDiscountsTotal(0);
+      })
+      .finally(() => setTopDiscountsLoading(false));
+  }, [selectedCategoryId, filters.from, filters.to, topDiscountsCurrentPage, topDiscountsPageSize]);
 
   useEffect(() => {
     if (!selectedCategoryId) {
@@ -1663,13 +1747,32 @@ function ReportsView({
       .finally(() => setPriceChangesLoading(false));
   }, [selectedCategoryId, filters.from, filters.to]);
 
+  useEffect(() => {
+    if (!selectedCategoryId) {
+      setReportProducts([]);
+      onSelectProduct(null);
+      return;
+    }
+    setReportProductsLoading(true);
+    void fetchProducts({ category_id: selectedCategoryId })
+      .then((rows) => {
+        setReportProducts(rows);
+        const selected = rows.find((product) => product.id === selectedProduct?.id) ?? rows[0] ?? null;
+        onSelectProduct(selected);
+      })
+      .catch(() => {
+        setReportProducts([]);
+        onSelectProduct(null);
+      })
+      .finally(() => setReportProductsLoading(false));
+  }, [selectedCategoryId]);
+
   return (
     <section className="reports-layout">
       <MarketingDashboard
         categories={categories}
-        products={products}
         productCount={productCount}
-        runs={runs}
+        productSegments={productSegments}
         selectedCategory={selectedCategory}
         categoryStats={categoryStats}
         latestRun={latestRun}
@@ -1687,8 +1790,17 @@ function ReportsView({
           </label>
           <label>
             <span>Товар</span>
-            <select value={selectedProduct?.id ?? ''} onChange={(event) => onSelectProduct(Number(event.target.value))}>
-              {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+            <select
+              value={reportProducts.some((product) => product.id === selectedProduct?.id) ? selectedProduct?.id : ''}
+              onChange={(event) => {
+                const product = reportProducts.find((item) => item.id === Number(event.target.value)) ?? null;
+                onSelectProduct(product);
+              }}
+              disabled={reportProductsLoading}
+            >
+              {reportProductsLoading ? <option value="">Загрузка товаров...</option> : null}
+              {!reportProductsLoading && !reportProducts.length ? <option value="">Нет товаров</option> : null}
+              {reportProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
             </select>
           </label>
           <DateRangePicker
@@ -1727,9 +1839,10 @@ function ReportsView({
           <div className="panel-header compact">
             <div>
               <h2>Топ скидок</h2>
-              <p>По выбранной категории и периоду.</p>
+              <p>Все товары со скидками по выбранной категории и периоду.</p>
             </div>
           </div>
+          {topDiscountsLoading ? <LoadingStrip text="Загружаем товары со скидками..." /> : null}
           <div className="discount-list">
             {topDiscounts.map((item) => (
               <div className="discount-row" key={item.product_id}>
@@ -1738,7 +1851,22 @@ function ReportsView({
                 <b>{percent(item.discount_percent)}</b>
               </div>
             ))}
+            {!topDiscountsLoading && !topDiscounts.length ? <div className="empty-state">Скидок за выбранный период нет.</div> : null}
           </div>
+          <PaginationBar
+            totalItems={topDiscountsTotal}
+            pageStart={topDiscountsPageStart}
+            pageEnd={topDiscountsPageEnd}
+            page={topDiscountsCurrentPage}
+            totalPages={topDiscountsTotalPages}
+            pageSize={topDiscountsPageSize}
+            onPageChange={setTopDiscountsPage}
+            onPageSizeChange={(pageSize) => {
+              setTopDiscountsPageSize(pageSize);
+              setTopDiscountsPage(1);
+            }}
+            compact
+          />
         </div>
         <div className="panel table-panel wide-report">
           <div className="panel-header compact">
@@ -1763,15 +1891,18 @@ function ExportView({
   filters,
   markedDateKeys,
   selectedSourceId,
+  exportState,
   onFilterChange,
+  onDownload,
 }: {
   categories: ParserCategory[];
   filters: ProductFilters;
   markedDateKeys: string[];
   selectedSourceId: number | null;
+  exportState: LoadState;
   onFilterChange: (filters: ProductFilters) => void;
+  onDownload: (path: string, filename: string) => Promise<void>;
 }) {
-  const [state, setState] = useState<LoadState>({ loading: false, error: null });
   const exportParams = new URLSearchParams();
   if (selectedSourceId) exportParams.set('source_id', String(selectedSourceId));
   if (filters.categoryId) exportParams.set('category_id', filters.categoryId);
@@ -1785,28 +1916,17 @@ function ExportView({
   if (isAvailable !== undefined) exportParams.set('is_available', String(isAvailable));
   const path = `/api/v1/market-parser/export/products.xlsx${exportParams.toString() ? `?${exportParams.toString()}` : ''}`;
 
-  async function handleDownload() {
-    setState({ loading: true, error: null });
-    try {
-      await downloadFile(path, 'market_products.xlsx');
-      setState({ loading: false, error: null });
-    } catch (error) {
-      setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
   return (
     <>
-      {state.error ? <div className="notice">{state.error}</div> : null}
       <section className="panel export-panel">
         <div className="panel-header">
           <div>
             <h2>Экспорт по параметрам</h2>
             <p>Excel формируется по выбранной дате парсинга, категории, скидке и наличию.</p>
           </div>
-          <button className="primary-button" type="button" disabled={state.loading} onClick={() => void handleDownload()}>
+          <button className="primary-button" type="button" disabled={exportState.loading} onClick={() => void onDownload(path, 'market_products.xlsx')}>
             <Icon name="file" size={15} />
-            Скачать Excel
+            {exportState.loading ? 'Готовим Excel...' : 'Скачать Excel'}
           </button>
         </div>
         <ProductFilters
@@ -1815,6 +1935,12 @@ function ExportView({
           markedDateKeys={markedDateKeys}
           onChange={onFilterChange}
         />
+        {exportState.loading ? (
+          <div className="export-loading">
+            <LoadingStrip text="Формируем Excel-файл по выбранным параметрам..." />
+            <span>Можно подождать на этой странице, скачивание начнется автоматически.</span>
+          </div>
+        ) : null}
       </section>
     </>
   );
@@ -1874,6 +2000,19 @@ function LoadingStrip({ text }: { text: string }) {
     <div className="loading-strip" role="status" aria-live="polite">
       <span />
       <strong>{text}</strong>
+    </div>
+  );
+}
+
+function GlobalExportIndicator({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div className="sidebar-export-indicator" role="status" aria-live="polite">
+      <Icon name="file" size={16} />
+      <div>
+        <strong>Готовим Excel</strong>
+        <span>Файл формируется, скачивание начнется автоматически.</span>
+      </div>
     </div>
   );
 }
@@ -1999,35 +2138,6 @@ function filterCategoryTree(categories: ParserCategory[], query: string): Parser
 function leafCategories(categories: ParserCategory[]): Set<number> {
   const parentIds = new Set(categories.map((category) => category.parent_id).filter((id): id is number => Boolean(id)));
   return new Set(categories.filter((category) => !parentIds.has(category.id)).map((category) => category.id));
-}
-
-function categoryProductSegments(
-  categories: ParserCategory[],
-  products: MarketProduct[],
-): { label: string; count: number; percent: number }[] {
-  const categoryById = new Map(categories.map((category) => [category.id, category]));
-  const counts = new Map<string, number>();
-  for (const product of products) {
-    const category = product.category_id ? categoryById.get(product.category_id) : null;
-    const parent = category?.parent_id ? categoryById.get(category.parent_id) : null;
-    const label = parent?.name || category?.name || 'Без категории';
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-
-  const total = Math.max(1, products.length);
-  const rows = [...counts.entries()]
-    .map(([label, count]) => ({ label, count, percent: Math.max(1, Math.round((count / total) * 100)) }))
-    .sort((a, b) => b.count - a.count);
-  const top = rows.slice(0, 6);
-  const otherCount = rows.slice(6).reduce((sum, item) => sum + item.count, 0);
-  if (otherCount > 0) {
-    top.push({
-      label: 'Другие разделы',
-      count: otherCount,
-      percent: Math.max(1, Math.round((otherCount / total) * 100)),
-    });
-  }
-  return top;
 }
 
 function isRunActive(run: ParserRun): boolean {

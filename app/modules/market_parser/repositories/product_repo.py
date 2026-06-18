@@ -52,6 +52,50 @@ class ProductRepository:
             )
         return int(self.db.execute(stmt).scalar_one())
 
+    def category_segments(self, source_id: int | None = None, limit: int = 6) -> dict:
+        category_stmt = select(ParserCategory)
+        if source_id is not None:
+            category_stmt = category_stmt.where(ParserCategory.source_id == source_id)
+        categories = list(self.db.execute(category_stmt).scalars().all())
+        category_by_id = {category.id: category for category in categories}
+
+        count_stmt = select(MarketProduct.category_id, func.count(MarketProduct.id)).group_by(
+            MarketProduct.category_id
+        )
+        if source_id is not None:
+            count_stmt = count_stmt.where(MarketProduct.source_id == source_id)
+
+        counts: dict[tuple[int | None, str], int] = {}
+        total = 0
+        for category_id, count in self.db.execute(count_stmt).all():
+            root = self._root_category(category_id, category_by_id)
+            key = (root.id, root.name) if root is not None else (None, "Без категории")
+            counts[key] = counts.get(key, 0) + int(count)
+            total += int(count)
+
+        rows = [
+            {
+                "category_id": category_id,
+                "label": label,
+                "count": count,
+                "percent": self._segment_percent(count, total),
+            }
+            for (category_id, label), count in counts.items()
+        ]
+        rows.sort(key=lambda item: item["count"], reverse=True)
+        top = rows[:limit]
+        other_count = sum(item["count"] for item in rows[limit:])
+        if other_count:
+            top.append(
+                {
+                    "category_id": None,
+                    "label": "Другие разделы",
+                    "count": other_count,
+                    "percent": self._segment_percent(other_count, total),
+                }
+            )
+        return {"items": top, "total": total}
+
     def _filtered_stmt(
         self,
         source_id: int | None = None,
@@ -82,13 +126,40 @@ class ProductRepository:
             )
         return stmt
 
+    def _root_category(
+        self,
+        category_id: int | None,
+        category_by_id: dict[int, ParserCategory],
+    ) -> ParserCategory | None:
+        category = category_by_id.get(category_id) if category_id is not None else None
+        if category is None:
+            return None
+        seen_ids = set()
+        while category.parent_id and category.parent_id not in seen_ids:
+            seen_ids.add(category.id)
+            parent = category_by_id.get(category.parent_id)
+            if parent is None:
+                break
+            category = parent
+        return category
+
+    def _segment_percent(self, count: int, total: int) -> int:
+        if total <= 0 or count <= 0:
+            return 0
+        return max(1, round(count * 100 / total))
+
     def _category_scope_ids(self, category_id: int) -> list[int]:
-        child_ids = list(
-            self.db.execute(
-                select(ParserCategory.id).where(ParserCategory.parent_id == category_id)
-            ).scalars().all()
-        )
-        return [category_id, *child_ids]
+        scope_ids = [category_id]
+        pending_ids = [category_id]
+        while pending_ids:
+            child_ids = list(
+                self.db.execute(
+                    select(ParserCategory.id).where(ParserCategory.parent_id.in_(pending_ids))
+                ).scalars().all()
+            )
+            pending_ids = [child_id for child_id in child_ids if child_id not in scope_ids]
+            scope_ids.extend(pending_ids)
+        return scope_ids
 
     def get(self, product_id: int) -> MarketProduct | None:
         return self.db.get(MarketProduct, product_id)

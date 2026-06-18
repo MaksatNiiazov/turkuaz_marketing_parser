@@ -27,6 +27,18 @@ class ProductSummary(BaseModel):
     count: int
 
 
+class ProductCategorySegment(BaseModel):
+    category_id: int | None
+    label: str
+    count: int
+    percent: int
+
+
+class ProductCategorySegments(BaseModel):
+    items: list[ProductCategorySegment]
+    total: int
+
+
 class ProductPage(BaseModel):
     items: list[ProductRead]
     total: int

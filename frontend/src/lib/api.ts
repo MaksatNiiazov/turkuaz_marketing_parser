@@ -6,6 +6,8 @@ import type {
   ParserRun,
   ParserSource,
   PriceChangeItem,
+  ProductCategorySegments,
+  ProductDiscountPage,
   ProductPage,
   ProductSnapshot,
   ProductSummary,
@@ -215,6 +217,12 @@ export function fetchProductSummary(sourceId?: number): Promise<ProductSummary> 
   return requestJson<ProductSummary>(`/api/v1/market-parser/products/summary${params({ source_id: sourceId })}`);
 }
 
+export function fetchProductCategorySegments(sourceId?: number): Promise<ProductCategorySegments> {
+  return requestJson<ProductCategorySegments>(
+    `/api/v1/market-parser/products/category-segments${params({ source_id: sourceId })}`,
+  );
+}
+
 export function fetchProductPage(filters: {
   source_id?: number;
   category_id?: number;
@@ -263,6 +271,16 @@ export function fetchPriceChanges(filters: {
   to?: string;
 }): Promise<PriceChangeItem[]> {
   return requestJson<PriceChangeItem[]>(`/api/v1/market-parser/reports/price-changes${params(filters)}`);
+}
+
+export function fetchTopDiscounts(filters: {
+  category_id?: number;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ProductDiscountPage> {
+  return requestJson<ProductDiscountPage>(`/api/v1/market-parser/reports/top-discounts${params(filters)}`);
 }
 
 export async function login(email: string, password: string): Promise<void> {

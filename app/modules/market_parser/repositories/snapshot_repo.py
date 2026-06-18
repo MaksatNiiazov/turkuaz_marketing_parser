@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
-from app.modules.market_parser.models.entities import MarketProductSnapshot
+from app.modules.market_parser.models.entities import MarketProductSnapshot, ParserCategory
 
 
 class SnapshotRepository:
@@ -98,7 +98,9 @@ class SnapshotRepository:
     def list_for_category(
         self, category_id: int, from_date: date | None = None, to_date: date | None = None
     ) -> list[MarketProductSnapshot]:
-        stmt = select(MarketProductSnapshot).where(MarketProductSnapshot.category_id == category_id)
+        stmt = select(MarketProductSnapshot).where(
+            MarketProductSnapshot.category_id.in_(self._category_scope_ids(category_id))
+        )
         stmt = self._period_filter(stmt, from_date, to_date).order_by(MarketProductSnapshot.collected_at)
         result = self.db.execute(stmt)
         return list(result.scalars().all())
@@ -110,6 +112,19 @@ class SnapshotRepository:
         stmt = self._period_filter(stmt, from_date, to_date).order_by(MarketProductSnapshot.collected_at)
         result = self.db.execute(stmt)
         return list(result.scalars().all())
+
+    def _category_scope_ids(self, category_id: int) -> list[int]:
+        scope_ids = [category_id]
+        pending_ids = [category_id]
+        while pending_ids:
+            child_ids = list(
+                self.db.execute(
+                    select(ParserCategory.id).where(ParserCategory.parent_id.in_(pending_ids))
+                ).scalars().all()
+            )
+            pending_ids = [child_id for child_id in child_ids if child_id not in scope_ids]
+            scope_ids.extend(pending_ids)
+        return scope_ids
 
     def latest_by_product_ids(
         self,

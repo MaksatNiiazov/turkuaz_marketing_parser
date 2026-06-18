@@ -23,7 +23,13 @@ def seed_source_category(db_session):
     return source, category
 
 
-def parsed_product(price="100.00", discount_price=None, external_sku="external-1", sku="sku-1"):
+def parsed_product(
+    price="100.00",
+    discount_price=None,
+    external_sku="external-1",
+    sku="sku-1",
+    product_url="https://globus-online.kg/ru-kg/good/external-1",
+):
     return ParsedProduct(
         source_code="globus",
         external_sku=external_sku,
@@ -36,7 +42,7 @@ def parsed_product(price="100.00", discount_price=None, external_sku="external-1
         discount_price=Decimal(discount_price) if discount_price else None,
         discount_percent=Decimal("20.00") if discount_price else None,
         image_url="https://img",
-        product_url="https://globus-online.kg/ru-kg/good/external-1",
+        product_url=product_url,
         is_available=True,
         raw_data={"id": external_sku, "pigeonId": sku},
     )
@@ -128,3 +134,118 @@ def test_product_and_category_stats(db_session) -> None:
     assert category_stats.products_count == 1
     assert category_stats.discounted_products_count == 1
     assert category_stats.top_discounted_products[0].product_id == product.id
+
+
+def test_price_changes_use_base_price_only(db_session) -> None:
+    source, category = seed_source_category(db_session)
+    service = SnapshotService(db_session)
+    service.save_product_snapshot(
+        source_id=source.id,
+        category_id=category.id,
+        run_id=None,
+        parsed=parsed_product(price="100.00"),
+        collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+    )
+    service.save_product_snapshot(
+        source_id=source.id,
+        category_id=category.id,
+        run_id=None,
+        parsed=parsed_product(price="100.00", discount_price="80.00"),
+        collected_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    changes = StatsService(db_session).price_changes(category_id=category.id)
+
+    assert changes[0].first_price == Decimal("100.00")
+    assert changes[0].last_price == Decimal("100.00")
+    assert changes[0].change_percent == Decimal("0.00")
+
+
+def test_discount_page_returns_total_and_slice(db_session) -> None:
+    source, category = seed_source_category(db_session)
+    service = SnapshotService(db_session)
+    for index in range(5):
+        service.save_product_snapshot(
+            source_id=source.id,
+            category_id=category.id,
+            run_id=None,
+            parsed=parsed_product(
+                price="100.00",
+                discount_price=str(90 - index),
+                external_sku=f"external-{index}",
+                sku=f"sku-{index}",
+                product_url=f"https://globus-online.kg/ru-kg/good/external-{index}",
+            ),
+            collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+        )
+    db_session.commit()
+
+    page = StatsService(db_session).discount_page(category_id=category.id, limit=2, offset=2)
+
+    assert page.total == 5
+    assert page.limit == 2
+    assert page.offset == 2
+    assert len(page.items) == 2
+
+
+def test_category_stats_include_nested_categories(db_session) -> None:
+    source, parent = seed_source_category(db_session)
+    child = ParserCategory(
+        source_id=source.id,
+        external_id="child-cat",
+        name="Мясная лавка",
+        url="https://globus-online.kg/ru-kg/catalog/meat",
+        parent_id=parent.id,
+    )
+    db_session.add(child)
+    db_session.flush()
+
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=child.id,
+        run_id=None,
+        parsed=parsed_product(price="499.00"),
+        collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    stats = StatsService(db_session).category_stats(parent.id)
+
+    assert stats.products_count == 1
+    assert stats.avg_price == Decimal("499.00")
+
+
+def test_category_segments_count_all_products_by_root_category(db_session) -> None:
+    source, parent = seed_source_category(db_session)
+    child = ParserCategory(
+        source_id=source.id,
+        external_id="child-cat",
+        name="Вино",
+        url="https://globus-online.kg/ru-kg/catalog/wine",
+        parent_id=parent.id,
+    )
+    db_session.add(child)
+    db_session.flush()
+    service = SnapshotService(db_session)
+    for index in range(3):
+        service.save_product_snapshot(
+            source_id=source.id,
+            category_id=child.id,
+            run_id=None,
+            parsed=parsed_product(
+                price="100.00",
+                external_sku=f"segment-{index}",
+                sku=f"segment-{index}",
+                product_url=f"https://globus-online.kg/ru-kg/good/segment-{index}",
+            ),
+            collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+        )
+    db_session.commit()
+
+    segments = ProductRepository(db_session).category_segments(source_id=source.id)
+
+    assert segments["total"] == 3
+    assert segments["items"][0]["category_id"] == parent.id
+    assert segments["items"][0]["label"] == parent.name
+    assert segments["items"][0]["count"] == 3

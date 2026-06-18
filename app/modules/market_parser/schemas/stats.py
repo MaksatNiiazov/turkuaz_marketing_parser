@@ -27,6 +27,13 @@ class ProductDiscountItem(BaseModel):
     price: Decimal | None
 
 
+class ProductDiscountPage(BaseModel):
+    items: list[ProductDiscountItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class CategoryStats(BaseModel):
     category_id: int
     products_count: int
@@ -50,4 +57,3 @@ class PriceChangeItem(BaseModel):
 class ReportPeriod(BaseModel):
     from_date: date | None = None
     to_date: date | None = None
-

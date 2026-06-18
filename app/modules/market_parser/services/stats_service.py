@@ -13,6 +13,7 @@ from app.modules.market_parser.schemas.stats import (
     CategoryStats,
     PriceChangeItem,
     ProductDiscountItem,
+    ProductDiscountPage,
     ProductStats,
 )
 
@@ -108,7 +109,7 @@ class StatsService:
             by_product[snapshot.product_id].append(snapshot)
         result = []
         for product_id, items in by_product.items():
-            prices = [effective_price(item) for item in items if effective_price(item) is not None]
+            prices = [item.price for item in items if item.price is not None]
             if len(prices) < 2:
                 continue
             product = items[-1].product
@@ -124,8 +125,23 @@ class StatsService:
         return result
 
     def top_discounts(
-        self, from_date: date | None = None, to_date: date | None = None, category_id: int | None = None
+        self,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        category_id: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[ProductDiscountItem]:
+        return self.discount_page(from_date, to_date, category_id=category_id, limit=limit, offset=offset).items
+
+    def discount_page(
+        self,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        category_id: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> ProductDiscountPage:
         snapshots = (
             self.snapshots.list_for_category(category_id, from_date, to_date)
             if category_id is not None
@@ -133,7 +149,8 @@ class StatsService:
         )
         latest = latest_per_product(snapshots)
         discounted = [s for s in latest if s.discount_percent is not None]
-        return [
+        sorted_discounts = sorted(discounted, key=lambda s: s.discount_percent or Decimal("0"), reverse=True)
+        items = [
             ProductDiscountItem(
                 product_id=s.product_id,
                 name=s.product.name,
@@ -141,8 +158,9 @@ class StatsService:
                 discount_price=s.discount_price,
                 price=s.price,
             )
-            for s in sorted(discounted, key=lambda s: s.discount_percent or Decimal("0"), reverse=True)[:50]
+            for s in sorted_discounts[offset : offset + limit]
         ]
+        return ProductDiscountPage(items=items, total=len(sorted_discounts), limit=limit, offset=offset)
 
 
 def effective_price(snapshot: MarketProductSnapshot) -> Decimal | None:
