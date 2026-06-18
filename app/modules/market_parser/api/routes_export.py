@@ -14,11 +14,31 @@ router = APIRouter()
 
 @router.get("/export/products.xlsx")
 def export_products(
+    source_id: int | None = None,
+    category_id: int | None = None,
+    name: str | None = None,
+    sku: str | None = None,
+    has_discount: bool | None = None,
+    is_available: bool | None = None,
+    run_id: int | None = None,
+    from_date: Annotated[date | None, Query(alias="from")] = None,
+    to_date: Annotated[date | None, Query(alias="to")] = None,
     db: Session = Depends(get_db),
     _claims: dict = Depends(require_permission("market_parser.export.read")),
 ):
-    output = ExportService(db).products_xlsx()
-    return xlsx_response(output, "market_products.xlsx")
+    output = ExportService(db).products_xlsx(
+        source_id=source_id,
+        category_id=category_id,
+        name=name,
+        sku=sku,
+        has_discount=has_discount,
+        is_available=is_available,
+        from_date=from_date,
+        to_date=to_date,
+        run_id=run_id,
+    )
+    filename = f"market_run_{run_id}.xlsx" if run_id is not None else "market_products.xlsx"
+    return xlsx_response(output, filename)
 
 
 @router.get("/export/stats.xlsx")

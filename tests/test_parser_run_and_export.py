@@ -200,3 +200,311 @@ def test_export_xlsx(db_session) -> None:
     assert workbook["Товары"]["J2"].value == "доступно"
     assert workbook["Скидки"]["D2"].value == "Шоколад"
     assert workbook["Скидки"]["H2"].value == "доступно"
+
+
+def test_products_export_filters_by_period_and_discount(db_session) -> None:
+    source, good, _ = seed_source_categories(db_session)
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=None,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="discounted",
+            sku="D-1",
+            name="Товар со скидкой",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("120.00"),
+            discount_price=Decimal("90.00"),
+            discount_percent=Decimal("25.00"),
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/discounted",
+            is_available=True,
+            raw_data={"id": "discounted"},
+        ),
+        collected_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=None,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="discounted",
+            sku="D-1",
+            name="Товар со скидкой",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("110.00"),
+            discount_price=Decimal("88.00"),
+            discount_percent=Decimal("20.00"),
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/discounted",
+            is_available=True,
+            raw_data={"id": "discounted"},
+        ),
+        collected_at=datetime(2026, 6, 10, 12, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=None,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="regular",
+            sku="R-1",
+            name="Товар без скидки",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("80.00"),
+            discount_price=None,
+            discount_percent=None,
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/regular",
+            is_available=True,
+            raw_data={"id": "regular"},
+        ),
+        collected_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=None,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="outside-period",
+            sku="O-1",
+            name="Вне периода",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("70.00"),
+            discount_price=Decimal("60.00"),
+            discount_percent=Decimal("14.29"),
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/outside-period",
+            is_available=True,
+            raw_data={"id": "outside-period"},
+        ),
+        collected_at=datetime(2026, 6, 11, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    discounted_output = ExportService(db_session).products_xlsx(
+        category_id=good.id,
+        has_discount=True,
+        from_date=datetime(2026, 6, 10).date(),
+        to_date=datetime(2026, 6, 10).date(),
+    )
+    discounted_sheet = load_workbook(discounted_output)["Товары"]
+    assert discounted_sheet.max_row == 2
+    assert discounted_sheet["D2"].value == "Товар со скидкой"
+    assert discounted_sheet["J1"].value == "2026-06-10 price"
+    assert discounted_sheet["K1"].value == "2026-06-10 discount_price"
+    assert discounted_sheet["L1"].value == "2026-06-10 discount_percent"
+    assert discounted_sheet["J2"].value == 110
+    assert discounted_sheet["K2"].value == 88
+    assert discounted_sheet["L2"].value == 20
+
+    regular_output = ExportService(db_session).products_xlsx(
+        category_id=good.id,
+        has_discount=False,
+        from_date=datetime(2026, 6, 10).date(),
+        to_date=datetime(2026, 6, 10).date(),
+    )
+    regular_sheet = load_workbook(regular_output)["Товары"]
+    assert regular_sheet.max_row == 2
+    assert regular_sheet["D2"].value == "Товар без скидки"
+    assert regular_sheet["J2"].value == 80
+
+
+def test_products_export_period_uses_fullest_run_per_day(db_session) -> None:
+    source, good, _ = seed_source_categories(db_session)
+    first_run = ParserRun(
+        source_id=source.id,
+        status="success",
+        started_at=datetime(2026, 6, 14, 9, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 6, 14, 9, 20, tzinfo=timezone.utc),
+        total_categories=1,
+        processed_categories=1,
+        total_products=1,
+        saved_products=1,
+    )
+    second_run = ParserRun(
+        source_id=source.id,
+        status="success",
+        started_at=datetime(2026, 6, 14, 16, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 6, 14, 16, 20, tzinfo=timezone.utc),
+        total_categories=1,
+        processed_categories=1,
+        total_products=2,
+        saved_products=2,
+    )
+    db_session.add_all([first_run, second_run])
+    db_session.flush()
+
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=first_run.id,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="daily-a",
+            sku="DAILY-A",
+            name="Дневной товар А",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("100.00"),
+            discount_price=None,
+            discount_percent=None,
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/daily-a",
+            is_available=True,
+            raw_data={"id": "daily-a"},
+        ),
+        collected_at=datetime(2026, 6, 14, 9, 10, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=second_run.id,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="daily-a",
+            sku="DAILY-A",
+            name="Дневной товар А",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("120.00"),
+            discount_price=None,
+            discount_percent=None,
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/daily-a",
+            is_available=True,
+            raw_data={"id": "daily-a"},
+        ),
+        collected_at=datetime(2026, 6, 14, 16, 10, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=second_run.id,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="daily-b",
+            sku="DAILY-B",
+            name="Дневной товар Б",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("50.00"),
+            discount_price=Decimal("45.00"),
+            discount_percent=Decimal("10.00"),
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/daily-b",
+            is_available=True,
+            raw_data={"id": "daily-b"},
+        ),
+        collected_at=datetime(2026, 6, 14, 16, 12, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    output = ExportService(db_session).products_xlsx(
+        category_id=good.id,
+        from_date=datetime(2026, 6, 14).date(),
+        to_date=datetime(2026, 6, 14).date(),
+    )
+    sheet = load_workbook(output)["Товары"]
+    rows_by_name = {sheet[f"D{row}"].value: row for row in range(2, sheet.max_row + 1)}
+
+    assert sheet.max_row == 3
+    assert sheet["J1"].value == "2026-06-14 price"
+    assert sheet[f"J{rows_by_name['Дневной товар А']}"].value == 120
+    assert sheet[f"J{rows_by_name['Дневной товар Б']}"].value == 50
+    assert sheet[f"K{rows_by_name['Дневной товар Б']}"].value == 45
+
+
+def test_products_export_filters_by_run_id(db_session) -> None:
+    source, good, _ = seed_source_categories(db_session)
+    first_run = ParserRun(
+        source_id=source.id,
+        status="success",
+        started_at=datetime(2026, 6, 12, 9, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 6, 12, 9, 20, tzinfo=timezone.utc),
+        total_categories=1,
+        processed_categories=1,
+        total_products=1,
+        saved_products=1,
+    )
+    second_run = ParserRun(
+        source_id=source.id,
+        status="success",
+        started_at=datetime(2026, 6, 13, 9, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 6, 13, 9, 20, tzinfo=timezone.utc),
+        total_categories=1,
+        processed_categories=1,
+        total_products=1,
+        saved_products=1,
+    )
+    db_session.add_all([first_run, second_run])
+    db_session.flush()
+
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=first_run.id,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="run-product",
+            sku="RUN-1",
+            name="Исторический товар",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("100.00"),
+            discount_price=None,
+            discount_percent=None,
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/run-product",
+            is_available=True,
+            raw_data={"id": "run-product"},
+        ),
+        collected_at=datetime(2026, 6, 12, 9, 10, tzinfo=timezone.utc),
+    )
+    SnapshotService(db_session).save_product_snapshot(
+        source_id=source.id,
+        category_id=good.id,
+        run_id=second_run.id,
+        parsed=ParsedProduct(
+            source_code="globus",
+            external_sku="run-product",
+            sku="RUN-1",
+            name="Исторический товар",
+            unit="шт.",
+            category_name=good.name,
+            category_url=good.url,
+            price=Decimal("140.00"),
+            discount_price=None,
+            discount_percent=None,
+            image_url=None,
+            product_url="https://globus-online.kg/ru-kg/good/run-product",
+            is_available=True,
+            raw_data={"id": "run-product"},
+        ),
+        collected_at=datetime(2026, 6, 13, 9, 10, tzinfo=timezone.utc),
+    )
+    db_session.commit()
+
+    output = ExportService(db_session).products_xlsx(run_id=first_run.id)
+    sheet = load_workbook(output)["Товары"]
+
+    assert sheet.max_row == 2
+    assert sheet["D2"].value == "Исторический товар"
+    assert sheet["H2"].value == 100
+    assert sheet["M2"].value == datetime(2026, 6, 12, 9, 10).replace(tzinfo=None)

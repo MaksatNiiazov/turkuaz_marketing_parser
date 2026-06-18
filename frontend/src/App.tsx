@@ -49,8 +49,8 @@ type ProductFilters = {
   name: string;
   sku: string;
   categoryId: string;
-  hasDiscount: boolean;
-  isAvailable: boolean;
+  discountMode: 'all' | 'with' | 'without';
+  availabilityMode: 'all' | 'available' | 'unavailable';
   from: string;
   to: string;
 };
@@ -59,8 +59,8 @@ const initialProductFilters: ProductFilters = {
   name: '',
   sku: '',
   categoryId: '',
-  hasDiscount: false,
-  isAvailable: false,
+  discountMode: 'all',
+  availabilityMode: 'all',
   from: '',
   to: '',
 };
@@ -93,6 +93,7 @@ export function App() {
   const parentCategoryIds = new Set(categories.map((category) => category.parent_id).filter(Boolean));
   const enabledCategories = categories.filter((category) => category.is_enabled && !parentCategoryIds.has(category.id));
   const latestRun = runs[0] ?? null;
+  const parsedDateKeys = parserRunDateKeys(runs);
 
   const loadData = useCallback(async () => {
     if (!getToken()) {
@@ -257,6 +258,19 @@ export function App() {
     }
   }
 
+  async function handleExportRun(runId: number) {
+    setActionState({ loading: true, error: null });
+    try {
+      await downloadFile(
+        `/api/v1/market-parser/export/products.xlsx?run_id=${runId}`,
+        `market_run_${runId}.xlsx`,
+      );
+      setActionState({ loading: false, error: null });
+    } catch (error) {
+      setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   async function loadProducts() {
     setActionState({ loading: true, error: null });
     try {
@@ -265,8 +279,10 @@ export function App() {
         category_id: filters.categoryId ? Number(filters.categoryId) : undefined,
         name: filters.name || undefined,
         sku: filters.sku || undefined,
-        has_discount: filters.hasDiscount || undefined,
-        is_available: filters.isAvailable || undefined,
+        has_discount: discountFilterValue(filters.discountMode),
+        is_available: availabilityFilterValue(filters.availabilityMode),
+        from: filters.from || undefined,
+        to: filters.to || undefined,
       });
       setProducts(rows);
       setSelectedProductId((current) =>
@@ -424,7 +440,12 @@ export function App() {
       ) : null}
 
       {view === 'runs' ? (
-        <RunsView runs={runs} loading={actionState.loading} onStopRun={(runId) => void handleStopRun(runId)} />
+        <RunsView
+          runs={runs}
+          loading={actionState.loading}
+          onExportRun={(runId) => void handleExportRun(runId)}
+          onStopRun={(runId) => void handleStopRun(runId)}
+        />
       ) : null}
 
       {view === 'products' ? (
@@ -435,6 +456,7 @@ export function App() {
           snapshots={snapshots}
           stats={productStats}
           filters={filters}
+          markedDateKeys={parsedDateKeys}
           loading={actionState.loading}
           onFilterChange={setFilters}
           onApplyFilters={() => void loadProducts()}
@@ -446,11 +468,14 @@ export function App() {
         <ReportsView
           categories={categories}
           products={products}
+          runs={runs}
           selectedCategoryId={selectedCategoryId}
           selectedProduct={selectedProduct}
           productStats={productStats}
           categoryStats={categoryStats}
+          latestRun={latestRun}
           filters={filters}
+          markedDateKeys={parsedDateKeys}
           onSelectCategory={setSelectedCategoryId}
           onSelectProduct={setSelectedProductId}
           onFilterChange={setFilters}
@@ -458,7 +483,13 @@ export function App() {
       ) : null}
 
       {view === 'export' ? (
-        <ExportView selectedCategoryId={selectedCategoryId} from={filters.from} to={filters.to} />
+        <ExportView
+          categories={categories}
+          filters={filters}
+          markedDateKeys={parsedDateKeys}
+          selectedSourceId={selectedSourceId}
+          onFilterChange={setFilters}
+        />
       ) : null}
     </AppShell>
   );
@@ -579,6 +610,162 @@ function CategoryCheckbox({
   }, [indeterminate]);
 
   return <input ref={ref} type="checkbox" disabled={disabled} checked={checked} onChange={onChange} />;
+}
+
+function MarketingDashboard({
+  categories,
+  products,
+  runs,
+  selectedCategory,
+  categoryStats,
+  latestRun,
+}: {
+  categories: ParserCategory[];
+  products: MarketProduct[];
+  runs: ParserRun[];
+  selectedCategory: ParserCategory | null;
+  categoryStats: CategoryStats | null;
+  latestRun: ParserRun | null;
+}) {
+  const categorySegments = categoryProductSegments(categories, products);
+  const recentRuns = runs.slice(0, 8).reverse();
+  const maxRunProducts = Math.max(1, ...recentRuns.map((run) => run.saved_products));
+  const leafCategoryIds = leafCategories(categories);
+  const enabledLeafCount = categories.filter((category) => leafCategoryIds.has(category.id) && category.is_enabled).length;
+  const enabledPercent = leafCategoryIds.size ? Math.round((enabledLeafCount / leafCategoryIds.size) * 100) : 0;
+  const latestSavedRatio = latestRun?.total_products
+    ? Math.round((latestRun.saved_products / latestRun.total_products) * 100)
+    : 0;
+  const discountedPercent = categoryStats?.products_count
+    ? Math.round((categoryStats.discounted_products_count / categoryStats.products_count) * 100)
+    : 0;
+  const availablePercent = categoryStats?.products_count
+    ? Math.round((categoryStats.available_products_count / categoryStats.products_count) * 100)
+    : 0;
+  const moversTotal = (categoryStats?.price_increased_products ?? 0) + (categoryStats?.price_decreased_products ?? 0);
+  const increasedPercent = moversTotal
+    ? Math.round(((categoryStats?.price_increased_products ?? 0) / moversTotal) * 100)
+    : 0;
+  const focusName = selectedCategory?.name ?? 'Выбранная категория';
+
+  return (
+    <section className="marketing-dashboard">
+      <div className="panel dashboard-panel dashboard-hero">
+        <div className="dashboard-title">
+          <div>
+            <h2>Маркетинговый обзор</h2>
+            <p>Ассортимент, активность парсинга и скидочные сигналы в одном месте.</p>
+          </div>
+          <span>{latestRun ? `Обновлено: ${formatDate(latestRun.finished_at || latestRun.created_at)}` : 'Данных пока мало'}</span>
+        </div>
+        <div className="dashboard-kpis">
+          <DashboardKpi label="Ассортимент" value={products.length.toLocaleString('ru-RU')} hint="товаров в каталоге" />
+          <DashboardKpi label="Активные разделы" value={`${enabledPercent}%`} hint={`${enabledLeafCount}/${leafCategoryIds.size || 0} включены`} />
+          <DashboardKpi label="Сохранено в запуске" value={`${latestSavedRatio}%`} hint={latestRun ? `${latestRun.saved_products}/${latestRun.total_products}` : '-'} />
+          <DashboardKpi label="Скидки в фокусе" value={`${discountedPercent}%`} hint={focusName} />
+        </div>
+      </div>
+
+      <div className="panel dashboard-panel run-chart-panel">
+        <div className="mini-panel-head">
+          <h3>Динамика выгрузок</h3>
+          <span>последние запуски</span>
+        </div>
+        <div className="run-bars" aria-label="Сохраненные товары по последним запускам">
+          {recentRuns.length ? recentRuns.map((run) => {
+            const height = Math.max(8, Math.round((run.saved_products / maxRunProducts) * 100));
+            return (
+              <div className="run-bar-item" key={run.id}>
+                <div className="run-bar-track">
+                  <span className={statusTone(run.status)} style={{ height: `${height}%` }} />
+                </div>
+                <strong>{run.saved_products.toLocaleString('ru-RU')}</strong>
+                <small>#{run.id}</small>
+              </div>
+            );
+          }) : <div className="empty-state">После запусков появится тренд наполнения каталога.</div>}
+        </div>
+      </div>
+
+      <div className="panel dashboard-panel">
+        <div className="mini-panel-head">
+          <h3>Ассортимент по разделам</h3>
+          <span>топ категорий</span>
+        </div>
+        <div className="bar-list">
+          {categorySegments.length ? categorySegments.map((item) => (
+            <div className="bar-row" key={item.label}>
+              <div>
+                <strong>{item.label}</strong>
+                <span>{item.count.toLocaleString('ru-RU')} товаров</span>
+              </div>
+              <div className="bar-track">
+                <span style={{ width: `${item.percent}%` }} />
+              </div>
+              <b>{item.percent}%</b>
+            </div>
+          )) : <div className="empty-state">Категории появятся после синхронизации и парсинга.</div>}
+        </div>
+      </div>
+
+      <div className="panel dashboard-panel">
+        <div className="mini-panel-head">
+          <h3>{focusName}</h3>
+          <span>скидки и наличие</span>
+        </div>
+        <div className="focus-grid">
+          <GaugeCard label="Со скидкой" value={discountedPercent} detail={`${categoryStats?.discounted_products_count ?? 0} товаров`} />
+          <GaugeCard label="В наличии" value={availablePercent} detail={`${categoryStats?.available_products_count ?? 0} товаров`} />
+          <div className="price-movers">
+            <div className="mover-head">
+              <span>Изменение цены</span>
+              <strong>{moversTotal ? `${moversTotal} товаров` : '-'}</strong>
+            </div>
+            <div className="split-bar">
+              <span className="up" style={{ width: `${increasedPercent}%` }} />
+              <span className="down" style={{ width: `${100 - increasedPercent}%` }} />
+            </div>
+            <div className="mover-legend">
+              <span>↑ {categoryStats?.price_increased_products ?? 0}</span>
+              <span>↓ {categoryStats?.price_decreased_products ?? 0}</span>
+            </div>
+          </div>
+        </div>
+        {categoryStats?.top_discounted_products?.length ? (
+          <div className="top-discount-strip">
+            {categoryStats.top_discounted_products.slice(0, 3).map((item) => (
+              <div key={item.product_id}>
+                <strong>{percent(item.discount_percent)}</strong>
+                <span>{item.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function DashboardKpi({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="dashboard-kpi">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{hint}</small>
+    </div>
+  );
+}
+
+function GaugeCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <div className="gauge-card">
+      <div className="gauge" style={{ background: `conic-gradient(var(--teal) ${value * 3.6}deg, var(--surface-muted) 0deg)` }}>
+        <span>{value}%</span>
+      </div>
+      <strong>{label}</strong>
+      <small>{detail}</small>
+    </div>
+  );
 }
 
 function CategoriesView({
@@ -808,10 +995,12 @@ function CategoriesView({
 function RunsView({
   runs,
   loading,
+  onExportRun,
   onStopRun,
 }: {
   runs: ParserRun[];
   loading: boolean;
+  onExportRun: (runId: number) => void;
   onStopRun: (runId: number) => void;
 }) {
   return (
@@ -849,13 +1038,17 @@ function RunsView({
                 <td>{run.saved_products}/{run.total_products}</td>
                 <td className="error-cell"><RunErrorSummary message={run.error_message} /></td>
                 <td>
-                  {isRunActive(run) ? (
-                    <button className="text-button danger-button compact-button" type="button" disabled={loading} onClick={() => onStopRun(run.id)}>
-                      Остановить
+                  <div className="row-actions">
+                    <button className="text-button compact-button" type="button" disabled={loading} onClick={() => onExportRun(run.id)}>
+                      <Icon name="file" size={14} />
+                      Скачать
                     </button>
-                  ) : (
-                    <span className="muted-action">-</span>
-                  )}
+                    {isRunActive(run) ? (
+                      <button className="text-button danger-button compact-button" type="button" disabled={loading} onClick={() => onStopRun(run.id)}>
+                        Остановить
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -934,6 +1127,7 @@ function ProductsView({
   snapshots,
   stats,
   filters,
+  markedDateKeys,
   loading,
   onFilterChange,
   onApplyFilters,
@@ -945,6 +1139,7 @@ function ProductsView({
   snapshots: ProductSnapshot[];
   stats: ProductStats | null;
   filters: ProductFilters;
+  markedDateKeys: string[];
   loading: boolean;
   onFilterChange: (filters: ProductFilters) => void;
   onApplyFilters: () => void;
@@ -976,7 +1171,12 @@ function ProductsView({
             Применить
           </button>
         </div>
-        <ProductFilters categories={categories} filters={filters} onChange={onFilterChange} />
+        <ProductFilters
+          categories={categories}
+          filters={filters}
+          markedDateKeys={markedDateKeys}
+          onChange={onFilterChange}
+        />
         <PaginationBar
           totalItems={products.length}
           pageStart={pageStart}
@@ -1106,10 +1306,12 @@ function PaginationBar({
 function ProductFilters({
   categories,
   filters,
+  markedDateKeys,
   onChange,
 }: {
   categories: ParserCategory[];
   filters: ProductFilters;
+  markedDateKeys: string[];
   onChange: (filters: ProductFilters) => void;
 }) {
   return (
@@ -1131,22 +1333,148 @@ function ProductFilters({
           ))}
         </select>
       </label>
-      <label>
-        <span>С</span>
-        <input type="date" value={filters.from} onChange={(event) => onChange({ ...filters, from: event.target.value })} />
-      </label>
-      <label>
-        <span>По</span>
-        <input type="date" value={filters.to} onChange={(event) => onChange({ ...filters, to: event.target.value })} />
-      </label>
+      <DateRangePicker
+        from={filters.from}
+        to={filters.to}
+        markedDateKeys={markedDateKeys}
+        onChange={(from, to) => onChange({ ...filters, from, to })}
+      />
       <label className="check-row inline-check">
-        <input type="checkbox" checked={filters.hasDiscount} onChange={(event) => onChange({ ...filters, hasDiscount: event.target.checked })} />
         <span>Скидка</span>
+        <select value={filters.discountMode} onChange={(event) => onChange({ ...filters, discountMode: event.target.value as ProductFilters['discountMode'] })}>
+          <option value="all">Все</option>
+          <option value="with">Со скидкой</option>
+          <option value="without">Без скидки</option>
+        </select>
       </label>
       <label className="check-row inline-check">
-        <input type="checkbox" checked={filters.isAvailable} onChange={(event) => onChange({ ...filters, isAvailable: event.target.checked })} />
-        <span>В наличии</span>
+        <span>Наличие</span>
+        <select value={filters.availabilityMode} onChange={(event) => onChange({ ...filters, availabilityMode: event.target.value as ProductFilters['availabilityMode'] })}>
+          <option value="all">Все</option>
+          <option value="available">В наличии</option>
+          <option value="unavailable">Нет в наличии</option>
+        </select>
       </label>
+    </div>
+  );
+}
+
+function DateRangePicker({
+  from,
+  to,
+  markedDateKeys,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  markedDateKeys: string[];
+  onChange: (from: string, to: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<'below' | 'above'>('below');
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const [cursorDate, setCursorDate] = useState(
+    () => monthStart(from || to || markedDateKeys[markedDateKeys.length - 1]),
+  );
+  const markedSet = new Set(markedDateKeys);
+  const calendarDays = calendarMonthDays(cursorDate);
+
+  useEffect(() => {
+    if (from || to) {
+      setCursorDate(monthStart(from || to));
+    }
+  }, [from, to]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const rect = fieldRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const estimatedPopoverHeight = 420;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      setPlacement(spaceBelow >= estimatedPopoverHeight || spaceBelow >= spaceAbove ? 'below' : 'above');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  function handleSelect(dayKey: string) {
+    if (!from || (from && to)) {
+      onChange(dayKey, '');
+      return;
+    }
+    if (dayKey < from) {
+      onChange(dayKey, from);
+      return;
+    }
+    onChange(from, dayKey);
+  }
+
+  function shiftMonth(delta: number) {
+    setCursorDate((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
+  }
+
+  return (
+    <div className="date-range-field" ref={fieldRef}>
+      <span>Период</span>
+      <button className="date-range-trigger" type="button" onClick={() => setOpen((value) => !value)}>
+        <span>{dateRangeLabel(from, to)}</span>
+        <Icon name="activity" size={15} />
+      </button>
+      {open ? (
+        <div className={`date-range-popover ${placement}`}>
+          <div className="calendar-head">
+            <button className="icon-button" type="button" onClick={() => shiftMonth(-1)} aria-label="Предыдущий месяц">
+              <span aria-hidden="true">‹</span>
+            </button>
+            <strong>{monthLabel(cursorDate)}</strong>
+            <button className="icon-button" type="button" onClick={() => shiftMonth(1)} aria-label="Следующий месяц">
+              <span aria-hidden="true">›</span>
+            </button>
+          </div>
+          <div className="calendar-weekdays">
+            {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+              <span key={day}>{day}</span>
+            ))}
+          </div>
+          <div className="calendar-grid">
+            {calendarDays.map((day) => {
+              const inCurrentMonth = day.getMonth() === cursorDate.getMonth();
+              const key = dateKey(day);
+              const selected = key === from || key === to;
+              const inRange = Boolean(from && to && key > from && key < to);
+              const marked = markedSet.has(key);
+              return (
+                <button
+                  className={[
+                    'calendar-day',
+                    inCurrentMonth ? '' : 'muted',
+                    selected ? 'selected' : '',
+                    inRange ? 'in-range' : '',
+                    marked ? 'marked' : '',
+                  ].filter(Boolean).join(' ')}
+                  key={key}
+                  type="button"
+                  onClick={() => handleSelect(key)}
+                >
+                  <span>{day.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="calendar-footer">
+            <span>{markedDateKeys.length ? `Дней с парсингом: ${markedDateKeys.length}` : 'Дней с парсингом пока нет'}</span>
+            <div className="calendar-actions">
+              <button className="text-button compact-button" type="button" onClick={() => onChange('', '')}>
+                Очистить
+              </button>
+              <button className="primary-button compact-button" type="button" onClick={() => setOpen(false)}>
+                Применить
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1215,31 +1543,47 @@ function ProductDetail({
 function ReportsView({
   categories,
   products,
+  runs,
   selectedCategoryId,
   selectedProduct,
   productStats,
   categoryStats,
+  latestRun,
   filters,
+  markedDateKeys,
   onSelectCategory,
   onSelectProduct,
   onFilterChange,
 }: {
   categories: ParserCategory[];
   products: MarketProduct[];
+  runs: ParserRun[];
   selectedCategoryId: number | null;
   selectedProduct: MarketProduct | null;
   productStats: ProductStats | null;
   categoryStats: CategoryStats | null;
+  latestRun: ParserRun | null;
   filters: ProductFilters;
+  markedDateKeys: string[];
   onSelectCategory: (id: number) => void;
   onSelectProduct: (id: number) => void;
   onFilterChange: (filters: ProductFilters) => void;
 }) {
   const topDiscounts = categoryStats?.top_discounted_products ?? [];
+  const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
   return (
     <section className="reports-layout">
+      <MarketingDashboard
+        categories={categories}
+        products={products}
+        runs={runs}
+        selectedCategory={selectedCategory}
+        categoryStats={categoryStats}
+        latestRun={latestRun}
+      />
+
       <div className="panel report-controls">
-        <div className="form-row four">
+        <div className="form-row report-filters">
           <label>
             <span>Категория</span>
             <select value={selectedCategoryId ?? ''} onChange={(event) => onSelectCategory(Number(event.target.value))}>
@@ -1252,14 +1596,12 @@ function ReportsView({
               {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
             </select>
           </label>
-          <label>
-            <span>С</span>
-            <input type="date" value={filters.from} onChange={(event) => onFilterChange({ ...filters, from: event.target.value })} />
-          </label>
-          <label>
-            <span>По</span>
-            <input type="date" value={filters.to} onChange={(event) => onFilterChange({ ...filters, to: event.target.value })} />
-          </label>
+          <DateRangePicker
+            from={filters.from}
+            to={filters.to}
+            markedDateKeys={markedDateKeys}
+            onChange={(from, to) => onFilterChange({ ...filters, from, to })}
+          />
         </div>
       </div>
 
@@ -1308,38 +1650,37 @@ function ReportsView({
   );
 }
 
-function ExportView({ selectedCategoryId, from, to }: { selectedCategoryId: number | null; from: string; to: string }) {
+function ExportView({
+  categories,
+  filters,
+  markedDateKeys,
+  selectedSourceId,
+  onFilterChange,
+}: {
+  categories: ParserCategory[];
+  filters: ProductFilters;
+  markedDateKeys: string[];
+  selectedSourceId: number | null;
+  onFilterChange: (filters: ProductFilters) => void;
+}) {
   const [state, setState] = useState<LoadState>({ loading: false, error: null });
-  const period = new URLSearchParams();
-  if (from) period.set('from', from);
-  if (to) period.set('to', to);
-  const suffix = period.toString() ? `?${period.toString()}` : '';
-  const items = [
-    {
-      title: 'Все товары',
-      text: 'Выгрузка с отдельными sku, external_id, ценами и статусом доступности.',
-      path: '/api/v1/market-parser/export/products.xlsx',
-      filename: 'market_products.xlsx',
-    },
-    {
-      title: 'Статистика',
-      text: 'Листы Товары, Цены, Скидки, Изменения и Свод за период.',
-      path: `/api/v1/market-parser/export/stats.xlsx${suffix}`,
-      filename: 'market_stats.xlsx',
-    },
-    {
-      title: 'Категория',
-      text: 'Отдельный Excel по выбранной категории.',
-      path: `/api/v1/market-parser/export/category/${selectedCategoryId ?? 0}.xlsx${suffix}`,
-      filename: `market_category_${selectedCategoryId ?? 0}.xlsx`,
-      disabled: !selectedCategoryId,
-    },
-  ];
+  const exportParams = new URLSearchParams();
+  if (selectedSourceId) exportParams.set('source_id', String(selectedSourceId));
+  if (filters.categoryId) exportParams.set('category_id', filters.categoryId);
+  if (filters.name) exportParams.set('name', filters.name);
+  if (filters.sku) exportParams.set('sku', filters.sku);
+  if (filters.from) exportParams.set('from', filters.from);
+  if (filters.to) exportParams.set('to', filters.to);
+  const hasDiscount = discountFilterValue(filters.discountMode);
+  const isAvailable = availabilityFilterValue(filters.availabilityMode);
+  if (hasDiscount !== undefined) exportParams.set('has_discount', String(hasDiscount));
+  if (isAvailable !== undefined) exportParams.set('is_available', String(isAvailable));
+  const path = `/api/v1/market-parser/export/products.xlsx${exportParams.toString() ? `?${exportParams.toString()}` : ''}`;
 
-  async function handleDownload(path: string, filename: string) {
+  async function handleDownload() {
     setState({ loading: true, error: null });
     try {
-      await downloadFile(path, filename);
+      await downloadFile(path, 'market_products.xlsx');
       setState({ loading: false, error: null });
     } catch (error) {
       setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
@@ -1349,23 +1690,38 @@ function ExportView({ selectedCategoryId, from, to }: { selectedCategoryId: numb
   return (
     <>
       {state.error ? <div className="notice">{state.error}</div> : null}
-      <section className="export-grid">
-        {items.map((item) => (
-          <button
-            className={item.disabled ? 'export-card disabled' : 'export-card'}
-            disabled={item.disabled || state.loading}
-            key={item.title}
-            type="button"
-            onClick={() => void handleDownload(item.path, item.filename)}
-          >
-            <Icon name="file" size={22} />
-            <strong>{item.title}</strong>
-            <span>{item.text}</span>
+      <section className="panel export-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Экспорт по параметрам</h2>
+            <p>Excel формируется по выбранной дате парсинга, категории, скидке и наличию.</p>
+          </div>
+          <button className="primary-button" type="button" disabled={state.loading} onClick={() => void handleDownload()}>
+            <Icon name="file" size={15} />
+            Скачать Excel
           </button>
-        ))}
+        </div>
+        <ProductFilters
+          categories={categories}
+          filters={filters}
+          markedDateKeys={markedDateKeys}
+          onChange={onFilterChange}
+        />
       </section>
     </>
   );
+}
+
+function discountFilterValue(mode: ProductFilters['discountMode']): boolean | undefined {
+  if (mode === 'with') return true;
+  if (mode === 'without') return false;
+  return undefined;
+}
+
+function availabilityFilterValue(mode: ProductFilters['availabilityMode']): boolean | undefined {
+  if (mode === 'available') return true;
+  if (mode === 'unavailable') return false;
+  return undefined;
 }
 
 function Detail({ label, value }: { label: string; value: ReactNode }) {
@@ -1495,6 +1851,40 @@ function filterCategoryTree(categories: ParserCategory[], query: string): Parser
   return categories.filter((category) => visibleIds.has(category.id));
 }
 
+function leafCategories(categories: ParserCategory[]): Set<number> {
+  const parentIds = new Set(categories.map((category) => category.parent_id).filter((id): id is number => Boolean(id)));
+  return new Set(categories.filter((category) => !parentIds.has(category.id)).map((category) => category.id));
+}
+
+function categoryProductSegments(
+  categories: ParserCategory[],
+  products: MarketProduct[],
+): { label: string; count: number; percent: number }[] {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const counts = new Map<string, number>();
+  for (const product of products) {
+    const category = product.category_id ? categoryById.get(product.category_id) : null;
+    const parent = category?.parent_id ? categoryById.get(category.parent_id) : null;
+    const label = parent?.name || category?.name || 'Без категории';
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  const total = Math.max(1, products.length);
+  const rows = [...counts.entries()]
+    .map(([label, count]) => ({ label, count, percent: Math.max(1, Math.round((count / total) * 100)) }))
+    .sort((a, b) => b.count - a.count);
+  const top = rows.slice(0, 6);
+  const otherCount = rows.slice(6).reduce((sum, item) => sum + item.count, 0);
+  if (otherCount > 0) {
+    top.push({
+      label: 'Другие разделы',
+      count: otherCount,
+      percent: Math.max(1, Math.round((otherCount / total) * 100)),
+    });
+  }
+  return top;
+}
+
 function isRunActive(run: ParserRun): boolean {
   return run.status === 'pending' || run.status === 'running' || run.status === 'stopping';
 }
@@ -1534,6 +1924,61 @@ function percent(value: string | number | null | undefined): string {
   const number = Number(value);
   if (Number.isNaN(number)) return `${value}%`;
   return `${number.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`;
+}
+
+function parserRunDateKeys(runs: ParserRun[]): string[] {
+  const keys = new Set<string>();
+  for (const run of runs) {
+    const value = run.finished_at || run.started_at || run.created_at;
+    if (!value) continue;
+    keys.add(dateKey(new Date(value)));
+  }
+  return [...keys].sort();
+}
+
+function dateRangeLabel(from: string, to: string): string {
+  if (from && to) return `${formatDateKey(from)} - ${formatDateKey(to)}`;
+  if (from) return `${formatDateKey(from)} - ...`;
+  return 'Все даты';
+}
+
+function monthStart(value?: string): Date {
+  const date = value ? parseDateKey(value) : new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function calendarMonthDays(month: Date): Date[] {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const mondayOffset = (first.getDay() + 6) % 7;
+  const start = new Date(first);
+  start.setDate(first.getDate() - mondayOffset);
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
+  });
+}
+
+function parseDateKey(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return new Date();
+  return new Date(year, month - 1, day);
+}
+
+function dateKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateKey(value: string): string {
+  const date = parseDateKey(value);
+  return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+function monthLabel(value: Date): string {
+  return value.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
 }
 
 function formatDate(value?: string | null): string {

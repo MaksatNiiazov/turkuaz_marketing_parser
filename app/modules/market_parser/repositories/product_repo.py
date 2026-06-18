@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.modules.market_parser.models.entities import MarketProduct, ParserCategory
 
@@ -19,7 +19,14 @@ class ProductRepository:
         name: str | None = None,
         sku: str | None = None,
     ) -> list[MarketProduct]:
-        stmt = select(MarketProduct).order_by(MarketProduct.name)
+        stmt = (
+            select(MarketProduct)
+            .options(
+                selectinload(MarketProduct.source),
+                selectinload(MarketProduct.category).selectinload(ParserCategory.parent),
+            )
+            .order_by(MarketProduct.name)
+        )
         if source_id is not None:
             stmt = stmt.where(MarketProduct.source_id == source_id)
         if category_id is not None:

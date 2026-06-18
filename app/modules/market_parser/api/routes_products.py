@@ -27,13 +27,19 @@ def list_products(
     _claims: dict = Depends(require_permission("market_parser.products.read")),
 ):
     products = ProductRepository(db).list(source_id=source_id, category_id=category_id, name=name, sku=sku)
-    if has_discount is None and is_available is None:
+    if has_discount is None and is_available is None and from_date is None and to_date is None:
         return products
-    snapshots = SnapshotRepository(db).latest_by_product_ids([product.id for product in products])
+    snapshots = SnapshotRepository(db).latest_by_product_ids(
+        [product.id for product in products],
+        from_date,
+        to_date,
+    )
     latest = {snapshot.product_id: snapshot for snapshot in snapshots}
     filtered = []
     for product in products:
         snapshot = latest.get(product.id)
+        if (from_date is not None or to_date is not None) and snapshot is None:
+            continue
         if has_discount is not None:
             discounted = bool(snapshot and (snapshot.discount_price is not None or snapshot.discount_percent is not None))
             if discounted != has_discount:

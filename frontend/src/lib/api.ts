@@ -202,6 +202,8 @@ export function fetchProducts(filters: {
   sku?: string;
   has_discount?: boolean;
   is_available?: boolean;
+  from?: string;
+  to?: string;
 }): Promise<MarketProduct[]> {
   return requestJson<MarketProduct[]>(`/api/v1/market-parser/products${params(filters)}`);
 }

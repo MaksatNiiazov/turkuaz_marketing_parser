@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 from io import BytesIO
 import re
@@ -20,12 +21,22 @@ class ExportService:
         self.snapshots = SnapshotRepository(db)
         self.stats = StatsService(db)
 
-    def products_xlsx(self) -> BytesIO:
-        products = self.products.list()
-        latest = {
-            snapshot.product_id: snapshot
-            for snapshot in self.snapshots.latest_by_product_ids([product.id for product in products])
-        }
+    def products_xlsx(
+        self,
+        source_id: int | None = None,
+        category_id: int | None = None,
+        name: str | None = None,
+        sku: str | None = None,
+        has_discount: bool | None = None,
+        is_available: bool | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        run_id: int | None = None,
+    ) -> BytesIO:
+        products = self.products.list(source_id=source_id, category_id=category_id, name=name, sku=sku)
+        if run_id is None and (from_date is not None or to_date is not None):
+            return self._period_products_xlsx(products, from_date, to_date, has_discount, is_available)
+        product_snapshots = self._product_snapshots_for_export(products, from_date, to_date, run_id)
         wb = self._base_workbook()
         ws = wb["Товары"]
         product_rows = []
@@ -47,14 +58,126 @@ class ExportService:
                 "collected_at",
             ],
         )
-        for product in products:
-            snapshot = latest.get(product.id)
+        for product, snapshot in product_snapshots:
+            if has_discount is not None:
+                discounted = bool(
+                    snapshot and (snapshot.discount_price is not None or snapshot.discount_percent is not None)
+                )
+                if discounted != has_discount:
+                    continue
+            if is_available is not None and (snapshot is None or snapshot.is_available != is_available):
+                continue
             row = self._product_export_row(product, snapshot)
             product_rows.append(row)
             ws.append(row)
         self._category_sheets(wb, product_rows)
         self._summary_sheet(wb)
         return save_workbook(wb)
+
+    def _product_snapshots_for_export(
+        self,
+        products: list,
+        from_date: date | None,
+        to_date: date | None,
+        run_id: int | None,
+    ) -> list[tuple]:
+        product_by_id = {product.id: product for product in products}
+        if run_id is not None:
+            snapshots = self.snapshots.list_for_run(run_id, from_date, to_date)
+            return [
+                (product_by_id[snapshot.product_id], snapshot)
+                for snapshot in snapshots
+                if snapshot.product_id in product_by_id
+            ]
+        if from_date is not None or to_date is not None:
+            snapshots = self.snapshots.list_for_product_ids(list(product_by_id), from_date, to_date)
+            return [
+                (product_by_id[snapshot.product_id], snapshot)
+                for snapshot in snapshots
+                if snapshot.product_id in product_by_id
+            ]
+        latest = {
+            snapshot.product_id: snapshot
+            for snapshot in self.snapshots.latest_by_product_ids(list(product_by_id))
+        }
+        return [(product, latest.get(product.id)) for product in products]
+
+    def _period_products_xlsx(
+        self,
+        products: list,
+        from_date: date | None,
+        to_date: date | None,
+        has_discount: bool | None,
+        is_available: bool | None,
+    ) -> BytesIO:
+        product_by_id = {product.id: product for product in products}
+        snapshots = self.snapshots.list_for_product_ids(list(product_by_id), from_date, to_date)
+        daily_snapshots = choose_daily_snapshots(snapshots)
+        days = sorted({day for _, day in daily_snapshots})
+
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("Товары")
+        headers = [
+            "source",
+            "sku",
+            "external_id",
+            "name",
+            "title",
+            "parent_category",
+            "category",
+            "media",
+            "product_url",
+        ]
+        for day in days:
+            label = day.isoformat()
+            headers.extend(
+                [
+                    f"{label} price",
+                    f"{label} discount_price",
+                    f"{label} discount_percent",
+                ]
+            )
+        ws.append(headers)
+
+        snapshots_by_product: dict[int, dict[date, object]] = defaultdict(dict)
+        for (product_id, day), snapshot in daily_snapshots.items():
+            snapshots_by_product[product_id][day] = snapshot
+
+        for product in products:
+            product_daily = snapshots_by_product.get(product.id, {})
+            if not product_daily:
+                continue
+            if not product_matches_filters(product_daily.values(), has_discount, is_available):
+                continue
+            parent_name, category_name = category_names(product)
+            row = [
+                product.source.code,
+                product.sku,
+                product.external_sku,
+                product.name,
+                product.unit,
+                parent_name,
+                category_name,
+                product.image_url,
+                product.product_url,
+            ]
+            for day in days:
+                snapshot = product_daily.get(day)
+                row.extend(
+                    [
+                        snapshot.price if snapshot else None,
+                        snapshot.discount_price if snapshot else None,
+                        snapshot.discount_percent if snapshot else None,
+                    ]
+                )
+            ws.append(row)
+
+        summary = wb.create_sheet("Свод")
+        summary.append(["Метрика", "Значение"])
+        summary.append(["Источник", "Globus Online"])
+        summary.append(["Формат", "Одна строка на товар, даты в колонках"])
+        summary.append(["Дней в выгрузке", len(days)])
+        return save_workbook_fast(wb)
 
     def stats_xlsx(
         self, from_date: date | None = None, to_date: date | None = None, category_id: int | None = None
@@ -251,6 +374,13 @@ def save_workbook(wb: Workbook) -> BytesIO:
     return output
 
 
+def save_workbook_fast(wb: Workbook) -> BytesIO:
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
 def category_names(product) -> tuple[str | None, str | None]:
     category = product.category
     if category is None:
@@ -266,6 +396,53 @@ def availability_text(value: bool | None) -> str:
     if value is False:
         return "нет в наличии"
     return "неизвестно"
+
+
+def choose_daily_snapshots(snapshots: list) -> dict[tuple[int, date], object]:
+    run_counts_by_day: dict[date, dict[int | None, int]] = defaultdict(lambda: defaultdict(int))
+    for snapshot in snapshots:
+        run_counts_by_day[snapshot.collected_at.date()][snapshot.run_id] += 1
+
+    selected_run_by_day = {
+        day: max(run_counts.items(), key=lambda item: (item[1], item[0] or 0))[0]
+        for day, run_counts in run_counts_by_day.items()
+    }
+
+    selected: dict[tuple[int, date], object] = {}
+    for snapshot in snapshots:
+        day = snapshot.collected_at.date()
+        if snapshot.run_id != selected_run_by_day[day]:
+            continue
+        key = (snapshot.product_id, day)
+        current = selected.get(key)
+        if current is None or snapshot_quality_key(snapshot) > snapshot_quality_key(current):
+            selected[key] = snapshot
+    return selected
+
+
+def snapshot_quality_key(snapshot) -> tuple[int, object]:
+    score = 0
+    if snapshot.price is not None:
+        score += 4
+    if snapshot.discount_price is not None:
+        score += 2
+    if snapshot.discount_percent is not None:
+        score += 1
+    return score, snapshot.collected_at
+
+
+def product_matches_filters(snapshots, has_discount: bool | None, is_available: bool | None) -> bool:
+    rows = list(snapshots)
+    if has_discount is not None:
+        matches_discount = any(
+            (snapshot.discount_price is not None or snapshot.discount_percent is not None) == has_discount
+            for snapshot in rows
+        )
+        if not matches_discount:
+            return False
+    if is_available is not None and not any(snapshot.is_available == is_available for snapshot in rows):
+        return False
+    return True
 
 
 def unique_sheet_title(wb: Workbook, value: str) -> str:

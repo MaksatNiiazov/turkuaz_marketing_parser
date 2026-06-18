@@ -65,6 +65,36 @@ class SnapshotRepository:
         result = self.db.execute(stmt)
         return list(result.scalars().all())
 
+    def list_for_product_ids(
+        self,
+        product_ids: list[int],
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> list[MarketProductSnapshot]:
+        if not product_ids:
+            return []
+        stmt = select(MarketProductSnapshot).where(MarketProductSnapshot.product_id.in_(product_ids))
+        stmt = self._period_filter(stmt, from_date, to_date).order_by(
+            MarketProductSnapshot.product_id,
+            MarketProductSnapshot.collected_at,
+        )
+        result = self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    def list_for_run(
+        self,
+        run_id: int,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> list[MarketProductSnapshot]:
+        stmt = select(MarketProductSnapshot).where(MarketProductSnapshot.run_id == run_id)
+        stmt = self._period_filter(stmt, from_date, to_date).order_by(
+            MarketProductSnapshot.product_id,
+            MarketProductSnapshot.collected_at,
+        )
+        result = self.db.execute(stmt)
+        return list(result.scalars().all())
+
     def list_for_category(
         self, category_id: int, from_date: date | None = None, to_date: date | None = None
     ) -> list[MarketProductSnapshot]:
@@ -81,16 +111,21 @@ class SnapshotRepository:
         result = self.db.execute(stmt)
         return list(result.scalars().all())
 
-    def latest_by_product_ids(self, product_ids: list[int]) -> list[MarketProductSnapshot]:
+    def latest_by_product_ids(
+        self,
+        product_ids: list[int],
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> list[MarketProductSnapshot]:
         if not product_ids:
             return []
+        latest_stmt = select(
+            MarketProductSnapshot.product_id,
+            func.max(MarketProductSnapshot.collected_at).label("max_collected_at"),
+        ).where(MarketProductSnapshot.product_id.in_(product_ids))
+        latest_stmt = self._period_filter(latest_stmt, from_date, to_date)
         subq = (
-            select(
-                MarketProductSnapshot.product_id,
-                func.max(MarketProductSnapshot.collected_at).label("max_collected_at"),
-            )
-            .where(MarketProductSnapshot.product_id.in_(product_ids))
-            .group_by(MarketProductSnapshot.product_id)
+            latest_stmt.group_by(MarketProductSnapshot.product_id)
             .subquery()
         )
         stmt = select(MarketProductSnapshot).join(
