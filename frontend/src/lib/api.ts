@@ -6,6 +6,7 @@ import type {
   ParserRun,
   ParserSource,
   ProductSnapshot,
+  ProductSummary,
   ProductStats,
 } from './types';
 
@@ -206,6 +207,10 @@ export function fetchProducts(filters: {
   to?: string;
 }): Promise<MarketProduct[]> {
   return requestJson<MarketProduct[]>(`/api/v1/market-parser/products${params(filters)}`);
+}
+
+export function fetchProductSummary(sourceId?: number): Promise<ProductSummary> {
+  return requestJson<ProductSummary>(`/api/v1/market-parser/products/summary${params({ source_id: sourceId })}`);
 }
 
 export function fetchProductSnapshots(

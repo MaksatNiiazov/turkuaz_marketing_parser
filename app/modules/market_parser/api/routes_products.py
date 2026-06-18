@@ -8,7 +8,7 @@ from app.core.auth import require_permission
 from app.db.session import get_db
 from app.modules.market_parser.repositories.product_repo import ProductRepository
 from app.modules.market_parser.repositories.snapshot_repo import SnapshotRepository
-from app.modules.market_parser.schemas.product import ProductRead, SnapshotRead
+from app.modules.market_parser.schemas.product import ProductRead, ProductSummary, SnapshotRead
 
 router = APIRouter()
 
@@ -48,6 +48,15 @@ def list_products(
             continue
         filtered.append(product)
     return filtered
+
+
+@router.get("/products/summary", response_model=ProductSummary)
+def products_summary(
+    source_id: int | None = None,
+    db: Session = Depends(get_db),
+    _claims: dict = Depends(require_permission("market_parser.products.read")),
+):
+    return ProductSummary(count=ProductRepository(db).count(source_id=source_id))
 
 
 @router.get("/products/{product_id}", response_model=ProductRead)

@@ -1017,6 +1017,37 @@ code {
   padding: 16px;
 }
 
+.loading-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--teal) 8%, transparent);
+  color: var(--teal-strong);
+  font-size: 13px;
+  padding: 10px 16px;
+}
+
+.loading-strip span {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--teal) 22%, transparent);
+  border-top-color: var(--teal);
+  border-radius: 999px;
+  animation: spin 820ms linear infinite;
+}
+
+.loading-strip strong {
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .product-cell {
   display: flex;
   align-items: center;

@@ -53,6 +53,10 @@ export type MarketProduct = {
   updated_at: string;
 };
 
+export type ProductSummary = {
+  count: number;
+};
+
 export type ProductSnapshot = {
   id: number;
   product_id: number;

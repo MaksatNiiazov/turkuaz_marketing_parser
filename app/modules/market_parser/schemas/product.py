@@ -23,6 +23,10 @@ class ProductRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProductSummary(BaseModel):
+    count: int
+
+
 class SnapshotRead(BaseModel):
     id: int
     product_id: int

@@ -13,6 +13,7 @@ import {
   fetchRun,
   fetchProductSnapshots,
   fetchProductStats,
+  fetchProductSummary,
   fetchProducts,
   fetchRuns,
   fetchSources,
@@ -71,6 +72,8 @@ export function App() {
   const [categories, setCategories] = useState<ParserCategory[]>([]);
   const [runs, setRuns] = useState<ParserRun[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
+  const [productCount, setProductCount] = useState(0);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
@@ -109,10 +112,10 @@ export function App() {
       ]);
       const sourceRows = await fetchSources();
       const sourceId = selectedSourceId ?? sourceRows[0]?.id ?? null;
-      const [categoryRows, runRows, productRows] = await Promise.all([
+      const [categoryRows, runRows, productSummary] = await Promise.all([
         sourceId ? fetchCategories(sourceId) : Promise.resolve([]),
         sourceId ? fetchRuns(sourceId) : Promise.resolve([]),
-        fetchProducts({ source_id: sourceId ?? undefined }),
+        fetchProductSummary(sourceId ?? undefined),
       ]);
       setCurrentUser(me);
       setServiceApps(serviceRows);
@@ -121,17 +124,14 @@ export function App() {
       setSelectedSourceId(sourceId);
       setCategories(categoryRows);
       setRuns(runRows);
-      setProducts(productRows);
+      setProducts([]);
+      setProductCount(productSummary.count);
       setSelectedCategoryId((current) =>
         current && categoryRows.some((category) => category.id === current)
           ? current
           : categoryRows[0]?.id ?? null,
       );
-      setSelectedProductId((current) =>
-        current && productRows.some((product) => product.id === current)
-          ? current
-          : productRows[0]?.id ?? null,
-      );
+      setSelectedProductId(null);
       setState({ loading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -146,6 +146,12 @@ export function App() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if ((view === 'products' || view === 'reports') && selectedSource) {
+      void loadProducts();
+    }
+  }, [view, selectedSource?.id]);
 
   useEffect(() => {
     if (!selectedProduct) {
@@ -273,6 +279,7 @@ export function App() {
 
   async function loadProducts() {
     setActionState({ loading: true, error: null });
+    setProductsLoading(true);
     try {
       const rows = await fetchProducts({
         source_id: selectedSource?.id,
@@ -289,8 +296,10 @@ export function App() {
         current && rows.some((product) => product.id === current) ? current : rows[0]?.id ?? null,
       );
       setActionState({ loading: false, error: null });
+      setProductsLoading(false);
     } catch (error) {
       setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      setProductsLoading(false);
     }
   }
 
@@ -304,6 +313,8 @@ export function App() {
     setCategories([]);
     setRuns([]);
     setProducts([]);
+    setProductCount(0);
+    setProductsLoading(false);
     setSelectedCategoryIds([]);
     setActiveRunId(null);
     setSelectedProductId(null);
@@ -321,7 +332,7 @@ export function App() {
     { label: 'Источники', value: sources.length, icon: 'database' as const },
     { label: 'Категории', value: categories.length, icon: 'sliders' as const },
     { label: 'Включены', value: enabledCategories.length, icon: 'shield' as const },
-    { label: 'Товары', value: products.length, icon: 'qr' as const },
+    { label: 'Товары', value: productCount, icon: 'qr' as const },
   ];
 
   const navItems = [
@@ -457,7 +468,8 @@ export function App() {
           stats={productStats}
           filters={filters}
           markedDateKeys={parsedDateKeys}
-          loading={actionState.loading}
+          loading={actionState.loading || productsLoading}
+          productsLoading={productsLoading}
           onFilterChange={setFilters}
           onApplyFilters={() => void loadProducts()}
           onSelectProduct={setSelectedProductId}
@@ -469,11 +481,13 @@ export function App() {
           categories={categories}
           products={products}
           runs={runs}
+          productCount={productCount}
           selectedCategoryId={selectedCategoryId}
           selectedProduct={selectedProduct}
           productStats={productStats}
           categoryStats={categoryStats}
           latestRun={latestRun}
+          productsLoading={productsLoading}
           filters={filters}
           markedDateKeys={parsedDateKeys}
           onSelectCategory={setSelectedCategoryId}
@@ -615,6 +629,7 @@ function CategoryCheckbox({
 function MarketingDashboard({
   categories,
   products,
+  productCount,
   runs,
   selectedCategory,
   categoryStats,
@@ -622,6 +637,7 @@ function MarketingDashboard({
 }: {
   categories: ParserCategory[];
   products: MarketProduct[];
+  productCount: number;
   runs: ParserRun[];
   selectedCategory: ParserCategory | null;
   categoryStats: CategoryStats | null;
@@ -659,7 +675,7 @@ function MarketingDashboard({
           <span>{latestRun ? `Обновлено: ${formatDate(latestRun.finished_at || latestRun.created_at)}` : 'Данных пока мало'}</span>
         </div>
         <div className="dashboard-kpis">
-          <DashboardKpi label="Ассортимент" value={products.length.toLocaleString('ru-RU')} hint="товаров в каталоге" />
+          <DashboardKpi label="Ассортимент" value={productCount.toLocaleString('ru-RU')} hint="товаров в каталоге" />
           <DashboardKpi label="Активные разделы" value={`${enabledPercent}%`} hint={`${enabledLeafCount}/${leafCategoryIds.size || 0} включены`} />
           <DashboardKpi label="Сохранено в запуске" value={`${latestSavedRatio}%`} hint={latestRun ? `${latestRun.saved_products}/${latestRun.total_products}` : '-'} />
           <DashboardKpi label="Скидки в фокусе" value={`${discountedPercent}%`} hint={focusName} />
@@ -1129,6 +1145,7 @@ function ProductsView({
   filters,
   markedDateKeys,
   loading,
+  productsLoading,
   onFilterChange,
   onApplyFilters,
   onSelectProduct,
@@ -1141,6 +1158,7 @@ function ProductsView({
   filters: ProductFilters;
   markedDateKeys: string[];
   loading: boolean;
+  productsLoading: boolean;
   onFilterChange: (filters: ProductFilters) => void;
   onApplyFilters: () => void;
   onSelectProduct: (id: number) => void;
@@ -1177,6 +1195,7 @@ function ProductsView({
           markedDateKeys={markedDateKeys}
           onChange={onFilterChange}
         />
+        {productsLoading ? <LoadingStrip text="Загружаем каталог товаров..." /> : null}
         <PaginationBar
           totalItems={products.length}
           pageStart={pageStart}
@@ -1544,11 +1563,13 @@ function ReportsView({
   categories,
   products,
   runs,
+  productCount,
   selectedCategoryId,
   selectedProduct,
   productStats,
   categoryStats,
   latestRun,
+  productsLoading,
   filters,
   markedDateKeys,
   onSelectCategory,
@@ -1558,11 +1579,13 @@ function ReportsView({
   categories: ParserCategory[];
   products: MarketProduct[];
   runs: ParserRun[];
+  productCount: number;
   selectedCategoryId: number | null;
   selectedProduct: MarketProduct | null;
   productStats: ProductStats | null;
   categoryStats: CategoryStats | null;
   latestRun: ParserRun | null;
+  productsLoading: boolean;
   filters: ProductFilters;
   markedDateKeys: string[];
   onSelectCategory: (id: number) => void;
@@ -1576,11 +1599,14 @@ function ReportsView({
       <MarketingDashboard
         categories={categories}
         products={products}
+        productCount={productCount}
         runs={runs}
         selectedCategory={selectedCategory}
         categoryStats={categoryStats}
         latestRun={latestRun}
       />
+
+      {productsLoading ? <LoadingStrip text="Загружаем товары для отчетов..." /> : null}
 
       <div className="panel report-controls">
         <div className="form-row report-filters">
@@ -1729,6 +1755,15 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
     <div className="detail-row">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function LoadingStrip({ text }: { text: string }) {
+  return (
+    <div className="loading-strip" role="status" aria-live="polite">
+      <span />
+      <strong>{text}</strong>
     </div>
   );
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.market_parser.models.entities import MarketProduct, ParserCategory
@@ -42,6 +42,12 @@ class ProductRepository:
             )
         result = self.db.execute(stmt)
         return list(result.scalars().all())
+
+    def count(self, source_id: int | None = None) -> int:
+        stmt = select(func.count(MarketProduct.id))
+        if source_id is not None:
+            stmt = stmt.where(MarketProduct.source_id == source_id)
+        return int(self.db.execute(stmt).scalar_one())
 
     def _category_scope_ids(self, category_id: int) -> list[int]:
         child_ids = list(
