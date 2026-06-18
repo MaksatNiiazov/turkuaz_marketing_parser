@@ -27,6 +27,13 @@ class ProductSummary(BaseModel):
     count: int
 
 
+class ProductPage(BaseModel):
+    items: list[ProductRead]
+    total: int
+    limit: int
+    offset: int
+
+
 class SnapshotRead(BaseModel):
     id: int
     product_id: int

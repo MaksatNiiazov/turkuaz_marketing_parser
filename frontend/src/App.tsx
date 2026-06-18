@@ -13,8 +13,8 @@ import {
   fetchRun,
   fetchProductSnapshots,
   fetchProductStats,
+  fetchProductPage,
   fetchProductSummary,
-  fetchProducts,
   fetchRuns,
   fetchSources,
   getToken,
@@ -73,7 +73,11 @@ export function App() {
   const [runs, setRuns] = useState<ParserRun[]>([]);
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [productCount, setProductCount] = useState(0);
+  const [productTotal, setProductTotal] = useState(0);
+  const [productPage, setProductPage] = useState(1);
+  const [productPageSize, setProductPageSize] = useState(50);
   const [productsLoading, setProductsLoading] = useState(false);
+  const [productLoadVersion, setProductLoadVersion] = useState(0);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
@@ -126,6 +130,9 @@ export function App() {
       setRuns(runRows);
       setProducts([]);
       setProductCount(productSummary.count);
+      setProductTotal(productSummary.count);
+      setProductPage(1);
+      setProductLoadVersion((version) => version + 1);
       setSelectedCategoryId((current) =>
         current && categoryRows.some((category) => category.id === current)
           ? current
@@ -149,9 +156,9 @@ export function App() {
 
   useEffect(() => {
     if ((view === 'products' || view === 'reports') && selectedSource) {
-      void loadProducts();
+      void loadProducts(productPage, productPageSize);
     }
-  }, [view, selectedSource?.id]);
+  }, [view, selectedSource?.id, productLoadVersion, productPage, productPageSize]);
 
   useEffect(() => {
     if (!selectedProduct) {
@@ -198,7 +205,8 @@ export function App() {
           setRuns((rows) => [run, ...rows.filter((item) => item.id !== run.id)]);
           if (!isRunActive(run)) {
             setActiveRunId(null);
-            void loadProducts();
+            void refreshProductSummary();
+            if (view === 'products' || view === 'reports') void loadProducts(productPage, productPageSize);
           }
         })
         .catch((error) =>
@@ -207,7 +215,7 @@ export function App() {
     }, 1500);
 
     return () => window.clearInterval(timer);
-  }, [activeRunId, runs]);
+  }, [activeRunId, runs, selectedSource?.id, view]);
 
   async function handleSyncCategories() {
     if (!selectedSource) return;
@@ -277,11 +285,12 @@ export function App() {
     }
   }
 
-  async function loadProducts() {
+  async function loadProducts(page = productPage, pageSize = productPageSize) {
     setActionState({ loading: true, error: null });
     setProductsLoading(true);
     try {
-      const rows = await fetchProducts({
+      const offset = (page - 1) * pageSize;
+      const pageData = await fetchProductPage({
         source_id: selectedSource?.id,
         category_id: filters.categoryId ? Number(filters.categoryId) : undefined,
         name: filters.name || undefined,
@@ -290,8 +299,12 @@ export function App() {
         is_available: availabilityFilterValue(filters.availabilityMode),
         from: filters.from || undefined,
         to: filters.to || undefined,
+        limit: pageSize,
+        offset,
       });
+      const rows = pageData.items;
       setProducts(rows);
+      setProductTotal(pageData.total);
       setSelectedProductId((current) =>
         current && rows.some((product) => product.id === current) ? current : rows[0]?.id ?? null,
       );
@@ -300,6 +313,15 @@ export function App() {
     } catch (error) {
       setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
       setProductsLoading(false);
+    }
+  }
+
+  async function refreshProductSummary() {
+    try {
+      const summary = await fetchProductSummary(selectedSource?.id);
+      setProductCount(summary.count);
+    } catch (error) {
+      setActionState({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -314,7 +336,11 @@ export function App() {
     setRuns([]);
     setProducts([]);
     setProductCount(0);
+    setProductTotal(0);
+    setProductPage(1);
+    setProductPageSize(50);
     setProductsLoading(false);
+    setProductLoadVersion(0);
     setSelectedCategoryIds([]);
     setActiveRunId(null);
     setSelectedProductId(null);
@@ -470,8 +496,19 @@ export function App() {
           markedDateKeys={parsedDateKeys}
           loading={actionState.loading || productsLoading}
           productsLoading={productsLoading}
+          totalItems={productTotal}
+          page={productPage}
+          pageSize={productPageSize}
           onFilterChange={setFilters}
-          onApplyFilters={() => void loadProducts()}
+          onApplyFilters={() => {
+            setProductPage(1);
+            void loadProducts(1, productPageSize);
+          }}
+          onPageChange={setProductPage}
+          onPageSizeChange={(pageSize) => {
+            setProductPageSize(pageSize);
+            setProductPage(1);
+          }}
           onSelectProduct={setSelectedProductId}
         />
       ) : null}
@@ -1146,8 +1183,13 @@ function ProductsView({
   markedDateKeys,
   loading,
   productsLoading,
+  totalItems,
+  page,
+  pageSize,
   onFilterChange,
   onApplyFilters,
+  onPageChange,
+  onPageSizeChange,
   onSelectProduct,
 }: {
   categories: ParserCategory[];
@@ -1159,22 +1201,20 @@ function ProductsView({
   markedDateKeys: string[];
   loading: boolean;
   productsLoading: boolean;
+  totalItems: number;
+  page: number;
+  pageSize: number;
   onFilterChange: (filters: ProductFilters) => void;
   onApplyFilters: () => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
   onSelectProduct: (id: number) => void;
 }) {
   const categoryById = new Map(categories.map((category) => [category.id, category]));
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-  const totalPages = Math.max(1, Math.ceil(products.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const pageStart = products.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const pageEnd = Math.min(currentPage * pageSize, products.length);
-  const pageProducts = products.slice(pageStart ? pageStart - 1 : 0, pageEnd);
-
-  useEffect(() => {
-    setPage(1);
-  }, [products, pageSize]);
+  const pageStart = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const pageEnd = Math.min((currentPage - 1) * pageSize + products.length, totalItems);
 
   return (
     <section className="content-grid product-grid">
@@ -1197,14 +1237,14 @@ function ProductsView({
         />
         {productsLoading ? <LoadingStrip text="Загружаем каталог товаров..." /> : null}
         <PaginationBar
-          totalItems={products.length}
+          totalItems={totalItems}
           pageStart={pageStart}
           pageEnd={pageEnd}
           page={currentPage}
           totalPages={totalPages}
           pageSize={pageSize}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
         />
         <div className="table-wrap">
           <table>
@@ -1219,7 +1259,7 @@ function ProductsView({
               </tr>
             </thead>
             <tbody>
-              {pageProducts.map((product) => (
+              {products.map((product) => (
                 <tr
                   className={selectedProduct?.id === product.id ? 'selected-row' : ''}
                   key={product.id}
@@ -1251,14 +1291,14 @@ function ProductsView({
           </table>
         </div>
         <PaginationBar
-          totalItems={products.length}
+          totalItems={totalItems}
           pageStart={pageStart}
           pageEnd={pageEnd}
           page={currentPage}
           totalPages={totalPages}
           pageSize={pageSize}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
           compact
         />
       </div>

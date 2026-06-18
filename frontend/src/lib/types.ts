@@ -57,6 +57,13 @@ export type ProductSummary = {
   count: number;
 };
 
+export type ProductPage = {
+  items: MarketProduct[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type ProductSnapshot = {
   id: number;
   product_id: number;

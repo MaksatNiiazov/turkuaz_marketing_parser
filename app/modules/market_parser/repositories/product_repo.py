@@ -18,7 +18,47 @@ class ProductRepository:
         category_id: int | None = None,
         name: str | None = None,
         sku: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[MarketProduct]:
+        stmt = self._filtered_stmt(source_id=source_id, category_id=category_id, name=name, sku=sku)
+        if offset is not None:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    def count(
+        self,
+        source_id: int | None = None,
+        category_id: int | None = None,
+        name: str | None = None,
+        sku: str | None = None,
+    ) -> int:
+        stmt = select(func.count(MarketProduct.id))
+        if source_id is not None:
+            stmt = stmt.where(MarketProduct.source_id == source_id)
+        if category_id is not None:
+            stmt = stmt.where(MarketProduct.category_id.in_(self._category_scope_ids(category_id)))
+        if name:
+            stmt = stmt.where(MarketProduct.name.ilike(f"%{name}%"))
+        if sku:
+            stmt = stmt.where(
+                or_(
+                    MarketProduct.sku.ilike(f"%{sku}%"),
+                    MarketProduct.external_sku.ilike(f"%{sku}%"),
+                )
+            )
+        return int(self.db.execute(stmt).scalar_one())
+
+    def _filtered_stmt(
+        self,
+        source_id: int | None = None,
+        category_id: int | None = None,
+        name: str | None = None,
+        sku: str | None = None,
+    ):
         stmt = (
             select(MarketProduct)
             .options(
@@ -40,14 +80,7 @@ class ProductRepository:
                     MarketProduct.external_sku.ilike(f"%{sku}%"),
                 )
             )
-        result = self.db.execute(stmt)
-        return list(result.scalars().all())
-
-    def count(self, source_id: int | None = None) -> int:
-        stmt = select(func.count(MarketProduct.id))
-        if source_id is not None:
-            stmt = stmt.where(MarketProduct.source_id == source_id)
-        return int(self.db.execute(stmt).scalar_one())
+        return stmt
 
     def _category_scope_ids(self, category_id: int) -> list[int]:
         child_ids = list(

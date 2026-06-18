@@ -5,6 +5,7 @@ import type {
   ParserCategory,
   ParserRun,
   ParserSource,
+  ProductPage,
   ProductSnapshot,
   ProductSummary,
   ProductStats,
@@ -211,6 +212,21 @@ export function fetchProducts(filters: {
 
 export function fetchProductSummary(sourceId?: number): Promise<ProductSummary> {
   return requestJson<ProductSummary>(`/api/v1/market-parser/products/summary${params({ source_id: sourceId })}`);
+}
+
+export function fetchProductPage(filters: {
+  source_id?: number;
+  category_id?: number;
+  name?: string;
+  sku?: string;
+  has_discount?: boolean;
+  is_available?: boolean;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ProductPage> {
+  return requestJson<ProductPage>(`/api/v1/market-parser/products/page${params(filters)}`);
 }
 
 export function fetchProductSnapshots(
