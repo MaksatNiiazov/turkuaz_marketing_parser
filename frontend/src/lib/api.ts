@@ -5,6 +5,7 @@ import type {
   ParserCategory,
   ParserRun,
   ParserSource,
+  PriceChangeItem,
   ProductPage,
   ProductSnapshot,
   ProductSummary,
@@ -254,6 +255,14 @@ export function fetchCategoryStats(
   return requestJson<CategoryStats>(
     `/api/v1/market-parser/categories/${categoryId}/stats${params(filters)}`,
   );
+}
+
+export function fetchPriceChanges(filters: {
+  category_id?: number;
+  from?: string;
+  to?: string;
+}): Promise<PriceChangeItem[]> {
+  return requestJson<PriceChangeItem[]>(`/api/v1/market-parser/reports/price-changes${params(filters)}`);
 }
 
 export async function login(email: string, password: string): Promise<void> {

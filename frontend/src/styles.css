@@ -278,7 +278,7 @@ input[type='checkbox'] {
 
 .date-range-popover {
   position: absolute;
-  z-index: 120;
+  z-index: 5000;
   left: 0;
   display: grid;
   gap: 10px;
@@ -1144,6 +1144,89 @@ code {
   color: var(--muted);
 }
 
+.price-change-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 8px 16px 16px;
+}
+
+.price-change-column {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.price-change-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.price-change-title strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.price-change-title span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.price-change-list {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.price-change-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+
+.price-change-row:last-child {
+  border-bottom: 0;
+}
+
+.price-change-row span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.price-change-row small {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.price-change-row b {
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.price-change-column.up .price-change-row b {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.price-change-column.down .price-change-row b {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
 .export-panel {
   position: relative;
   z-index: 5;
@@ -1270,7 +1353,12 @@ code {
   .marketing-dashboard,
   .dashboard-kpis,
   .focus-grid,
-  .top-discount-strip {
+  .top-discount-strip,
+  .price-change-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .price-change-row {
     grid-template-columns: 1fr;
   }
 

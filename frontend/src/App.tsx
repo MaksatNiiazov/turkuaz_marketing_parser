@@ -15,6 +15,7 @@ import {
   fetchProductStats,
   fetchProductPage,
   fetchProductSummary,
+  fetchPriceChanges,
   fetchRuns,
   fetchSources,
   getToken,
@@ -32,6 +33,7 @@ import type {
   ParserCategory,
   ParserRun,
   ParserSource,
+  PriceChangeItem,
   ProductSnapshot,
   ProductStats,
 } from './lib/types';
@@ -1634,6 +1636,33 @@ function ReportsView({
 }) {
   const topDiscounts = categoryStats?.top_discounted_products ?? [];
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
+  const [priceChanges, setPriceChanges] = useState<PriceChangeItem[]>([]);
+  const [priceChangesLoading, setPriceChangesLoading] = useState(false);
+  const priceIncreases = priceChanges
+    .filter((item) => Number(item.change_percent ?? 0) > 0)
+    .sort((a, b) => Number(b.change_percent ?? 0) - Number(a.change_percent ?? 0))
+    .slice(0, 10);
+  const priceDecreases = priceChanges
+    .filter((item) => Number(item.change_percent ?? 0) < 0)
+    .sort((a, b) => Number(a.change_percent ?? 0) - Number(b.change_percent ?? 0))
+    .slice(0, 10);
+
+  useEffect(() => {
+    if (!selectedCategoryId) {
+      setPriceChanges([]);
+      return;
+    }
+    setPriceChangesLoading(true);
+    void fetchPriceChanges({
+      category_id: selectedCategoryId,
+      from: filters.from || undefined,
+      to: filters.to || undefined,
+    })
+      .then(setPriceChanges)
+      .catch(() => setPriceChanges([]))
+      .finally(() => setPriceChangesLoading(false));
+  }, [selectedCategoryId, filters.from, filters.to]);
+
   return (
     <section className="reports-layout">
       <MarketingDashboard
@@ -1709,6 +1738,19 @@ function ReportsView({
                 <b>{percent(item.discount_percent)}</b>
               </div>
             ))}
+          </div>
+        </div>
+        <div className="panel table-panel wide-report">
+          <div className="panel-header compact">
+            <div>
+              <h2>Топ изменений цены</h2>
+              <p>Рост и снижение по выбранной категории и периоду.</p>
+            </div>
+          </div>
+          {priceChangesLoading ? <LoadingStrip text="Считаем изменения цены..." /> : null}
+          <div className="price-change-grid">
+            <PriceChangeColumn title="Повышение" tone="up" items={priceIncreases} />
+            <PriceChangeColumn title="Снижение" tone="down" items={priceDecreases} />
           </div>
         </div>
       </div>
@@ -1788,6 +1830,34 @@ function availabilityFilterValue(mode: ProductFilters['availabilityMode']): bool
   if (mode === 'available') return true;
   if (mode === 'unavailable') return false;
   return undefined;
+}
+
+function PriceChangeColumn({
+  title,
+  tone,
+  items,
+}: {
+  title: string;
+  tone: 'up' | 'down';
+  items: PriceChangeItem[];
+}) {
+  return (
+    <div className={`price-change-column ${tone}`}>
+      <div className="price-change-title">
+        <strong>{title}</strong>
+        <span>{items.length ? `${items.length} товаров` : 'нет данных'}</span>
+      </div>
+      <div className="price-change-list">
+        {items.length ? items.map((item) => (
+          <div className="price-change-row" key={`${tone}-${item.product_id}`}>
+            <span>{item.name}</span>
+            <small>{money(item.first_price)} → {money(item.last_price)}</small>
+            <b>{percent(item.change_percent)}</b>
+          </div>
+        )) : <div className="empty-state">За выбранный период изменений не найдено.</div>}
+      </div>
+    </div>
+  );
 }
 
 function Detail({ label, value }: { label: string; value: ReactNode }) {

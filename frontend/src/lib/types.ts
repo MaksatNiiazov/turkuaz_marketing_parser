@@ -102,6 +102,14 @@ export type ProductDiscountItem = {
   price: string | number | null;
 };
 
+export type PriceChangeItem = {
+  product_id: number;
+  name: string;
+  first_price: string | number | null;
+  last_price: string | number | null;
+  change_percent: string | number | null;
+};
+
 export type CategoryStats = {
   category_id: number;
   products_count: number;
