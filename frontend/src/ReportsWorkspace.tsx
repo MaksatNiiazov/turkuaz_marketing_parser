@@ -38,11 +38,6 @@ const sectionMeta: Record<ReportSection, { title: string; description: string; e
     description: 'Начавшиеся и завершившиеся акции между выбранными запусками.',
     events: ['promotion_started', 'promotion_ended'],
   },
-  availability: {
-    title: 'Изменения наличия',
-    description: 'Возвраты и подтвержденные переходы товаров в отсутствие.',
-    events: ['became_available', 'became_unavailable'],
-  },
 };
 
 export function ReportsWorkspace({ section, sourceId, categories, runs }: Props) {
@@ -133,15 +128,12 @@ function SummaryCards({ report, section }: { report: RunComparisonReport; sectio
         ['Исчезли', summary.disappeared_products, 'только в обработанных категориях'],
         ['Изменили цену', summary.price_increased + summary.price_decreased, `среднее ${percent(summary.average_price_change_percent)}`],
         ['Новые акции', summary.promotions_started, `${summary.promotions_ended} завершились`],
-        ['Нет в наличии', summary.unavailable_products, `${summary.unknown_availability} неизвестно`],
       ]
     : section === 'assortment'
       ? [['Было', summary.base_products, 'товаров'], ['Стало', summary.current_products, 'товаров'], ['Новые', summary.new_products, 'товаров'], ['Исчезли', summary.disappeared_products, 'товаров']]
       : section === 'prices'
         ? [['Подорожали', summary.price_increased, 'товаров'], ['Подешевели', summary.price_decreased, 'товаров'], ['Без изменений', summary.price_unchanged, 'товаров'], ['Среднее изменение', percent(summary.average_price_change_percent), 'по сопоставимым товарам']]
-        : section === 'promotions'
-          ? [['Начались', summary.promotions_started, 'акций'], ['Завершились', summary.promotions_ended, 'акций'], ['Товаров сейчас', summary.current_products, 'в сравнении']]
-          : [['В наличии', summary.available_products, 'товаров'], ['Нет в наличии', summary.unavailable_products, 'товаров'], ['Вернулись', summary.became_available, 'товаров'], ['Пропали', summary.became_unavailable, 'товаров'], ['Неизвестно', summary.unknown_availability, 'товаров']];
+        : [['Начались', summary.promotions_started, 'акций'], ['Завершились', summary.promotions_ended, 'акций'], ['Товаров сейчас', summary.current_products, 'в сравнении']];
   return (
     <div className="analytics-kpis">
       {cards.map(([label, value, hint]) => <div className="panel analytics-kpi" key={String(label)}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}
@@ -155,7 +147,6 @@ function OverviewSignals({ report }: { report: RunComparisonReport }) {
     ['Снижение цены', report.summary.price_decreased, 'price_decreased'],
     ['Начало акции', report.summary.promotions_started, 'promotion_started'],
     ['Завершение акции', report.summary.promotions_ended, 'promotion_ended'],
-    ['Пропали из наличия', report.summary.became_unavailable, 'became_unavailable'],
   ];
   const maximum = Math.max(1, ...rows.map((row) => Number(row[1])));
   return <div className="panel analytics-signals"><div className="panel-header"><div><h2>Сигналы последнего сравнения</h2><p>Количество событий по типам.</p></div></div>{rows.map(([label, value, code]) => <div className="analytics-signal" key={String(code)}><span>{label}</span><div><i style={{ width: `${Number(value) * 100 / maximum}%` }} /></div><strong>{value}</strong></div>)}</div>;
@@ -165,8 +156,8 @@ function EventsTable({ items, section }: { items: ComparisonItem[]; section: Rep
   return (
     <div className="panel analytics-table-panel">
       <div className="panel-header"><div><h2>Детализация</h2><p>{items.length} событий в загруженном сравнении</p></div></div>
-      <div className="table-scroll"><table><thead><tr><th>Товар</th><th>Категория</th><th>Событие</th>{section === 'prices' ? <><th>Было</th><th>Стало</th><th>Изменение</th></> : null}{section === 'promotions' ? <><th>Скидка была</th><th>Скидка стала</th></> : null}{section === 'availability' ? <><th>Было</th><th>Стало</th></> : null}</tr></thead><tbody>
-        {items.map((item) => <tr key={`${item.product_id}-${item.event_types.join('-')}`}><td><strong>{item.name}</strong><small>{item.sku || 'Без SKU'}</small></td><td>{item.category_name || 'Без категории'}</td><td>{item.event_types.map(eventLabel).join(', ')}</td>{section === 'prices' ? <><td>{money(item.old_price)}</td><td>{money(item.new_price)}</td><td className={Number(item.price_change_percent) > 0 ? 'value-up' : 'value-down'}>{percent(item.price_change_percent)}</td></> : null}{section === 'promotions' ? <><td>{percent(item.old_discount_percent)}</td><td>{percent(item.new_discount_percent)}</td></> : null}{section === 'availability' ? <><td>{availability(item.old_availability)}</td><td>{availability(item.new_availability)}</td></> : null}</tr>)}
+      <div className="table-scroll"><table><thead><tr><th>Товар</th><th>Категория</th><th>Событие</th>{section === 'prices' ? <><th>Было</th><th>Стало</th><th>Изменение</th></> : null}{section === 'promotions' ? <><th>Скидка была</th><th>Скидка стала</th></> : null}</tr></thead><tbody>
+        {items.map((item) => <tr key={`${item.product_id}-${item.event_types.join('-')}`}><td><strong>{item.name}</strong><small>{item.sku || 'Без SKU'}</small></td><td>{item.category_name || 'Без категории'}</td><td>{item.event_types.map(eventLabel).join(', ')}</td>{section === 'prices' ? <><td>{money(item.old_price)}</td><td>{money(item.new_price)}</td><td className={Number(item.price_change_percent) > 0 ? 'value-up' : 'value-down'}>{percent(item.price_change_percent)}</td></> : null}{section === 'promotions' ? <><td>{percent(item.old_discount_percent)}</td><td>{percent(item.new_discount_percent)}</td></> : null}</tr>)}
       </tbody></table></div>
       {!items.length ? <Empty text="Событий выбранного типа нет." /> : null}
     </div>
@@ -192,6 +183,5 @@ function signed(value: number) { return value > 0 ? `+${value}` : String(value);
 function money(value: string | number | null) { return value === null ? '—' : `${Number(value).toLocaleString('ru-RU')} сом`; }
 function percent(value: string | number | null) { return value === null ? '—' : `${Number(value).toLocaleString('ru-RU')}%`; }
 function date(value: string | null) { return value ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—'; }
-function availability(value: boolean | null) { return value === true ? 'В наличии' : value === false ? 'Нет в наличии' : 'Неизвестно'; }
 function severityLabel(value: string) { return value === 'critical' ? 'Требует внимания' : value === 'warning' ? 'Проверьте данные' : 'Информация'; }
-function eventLabel(value: string) { return ({ new_product: 'Новый товар', disappeared_product: 'Исчез', price_increased: 'Цена выросла', price_decreased: 'Цена снизилась', promotion_started: 'Акция началась', promotion_ended: 'Акция завершилась', became_available: 'Вернулся в наличие', became_unavailable: 'Пропал из наличия' } as Record<string, string>)[value] || value; }
+function eventLabel(value: string) { return ({ new_product: 'Новый товар', disappeared_product: 'Исчез', price_increased: 'Цена выросла', price_decreased: 'Цена снизилась', promotion_started: 'Акция началась', promotion_ended: 'Акция завершилась' } as Record<string, string>)[value] || value; }

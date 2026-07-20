@@ -141,7 +141,7 @@ export type CategoryStats = {
   price_decreased_products: number;
 };
 
-export type ReportSection = 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability';
+export type ReportSection = 'overview' | 'assortment' | 'prices' | 'promotions';
 
 export type ComparisonSummary = {
   base_products: number;
