@@ -32,7 +32,7 @@ def get_identity_claims(
 
 def require_permission(permission: str):
     def dependency(claims: Annotated[dict[str, Any], Depends(get_identity_claims)]) -> dict[str, Any]:
-        if has_permission(claims, permission):
+        if has_global_permission(claims, permission):
             return claims
 
         raise HTTPException(
@@ -43,11 +43,17 @@ def require_permission(permission: str):
     return dependency
 
 
-def has_permission(claims: dict[str, Any], permission: str) -> bool:
+def has_global_permission(claims: dict[str, Any], permission: str) -> bool:
+    """Check permissions for endpoints whose data is not scoped to an Identity branch."""
     global_permissions = claims.get("permissions")
-    if isinstance(global_permissions, list) and (
+    return isinstance(global_permissions, list) and (
         "*" in global_permissions or permission in global_permissions
-    ):
+    )
+
+
+def has_permission(claims: dict[str, Any], permission: str) -> bool:
+    """Check global or active-branch permissions for explicitly branch-scoped endpoints."""
+    if has_global_permission(claims, permission):
         return True
 
     branch_id, branch_code = _active_branch_claim(claims)

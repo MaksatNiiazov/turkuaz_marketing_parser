@@ -9,6 +9,7 @@ services:
       AUTH_ENABLED: "true"
       IDENTITY_SECRET_KEY: dev-change-me-32-byte-secret-key-for-turkuaz-identity
       IDENTITY_ALGORITHM: HS256
+      DEV_ADMIN_LOGIN_ENABLED: "false"
     ports:
       - "8503:8503"
     volumes:

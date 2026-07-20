@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { AppShell, fetchServiceRegistry, Icon, serviceLinksFromRegistry } from '@turkuaz/ui';
-import type { ServiceRegistryItem } from '@turkuaz/ui';
+import {
+  AppShell,
+  fetchCurrentIdentityUser,
+  fetchServiceRegistry,
+  Icon,
+  serviceLinksFromRegistry,
+} from '@turkuaz/ui';
+import type { CurrentIdentityUser, ServiceRegistryItem } from '@turkuaz/ui';
 import {
   clearToken,
+  DEV_ADMIN_LOGIN_ENABLED,
   DEV_ADMIN_EMAIL,
   DEV_ADMIN_PASSWORD,
   downloadFile,
   fetchCategories,
   fetchCategoryStats,
-  fetchMe,
   fetchProductCategorySegments,
   fetchRun,
   fetchProductSnapshots,
@@ -31,7 +37,6 @@ import {
 } from './lib/api';
 import type {
   CategoryStats,
-  CurrentUser,
   MarketProduct,
   ParserCategory,
   ParserRun,
@@ -101,7 +106,7 @@ export function App() {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<ProductFilters>(initialProductFilters);
   const [parseAllEnabled, setParseAllEnabled] = useState(true);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentIdentityUser | null>(null);
   const [serviceApps, setServiceApps] = useState<ServiceRegistryItem[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
 
@@ -124,7 +129,10 @@ export function App() {
     setState({ loading: true, error: null });
     try {
       const [me, serviceRows] = await Promise.all([
-        fetchMe(),
+        fetchCurrentIdentityUser({
+          identityApiBaseUrl: IDENTITY_API_BASE_URL,
+          tokenStorageKeys: ['identity_access_token', 'access_token'],
+        }),
         fetchServiceRegistry({ identityApiBaseUrl: IDENTITY_API_BASE_URL }).catch(() => [] as ServiceRegistryItem[]),
       ]);
       const sourceRows = await fetchSources();
@@ -631,7 +639,7 @@ function LoginScreen({
         <div>
           <p className="login-kicker">Turkuaz Ecosystem</p>
           <h1>Market Parser</h1>
-          <p>Войдите через Identity или временный локальный admin-доступ парсера.</p>
+          <p>Войдите через центральный сервис Identity.</p>
         </div>
         {error || submitState.error ? <div className="notice">{submitState.error || error}</div> : null}
         <form className="login-form" onSubmit={(event) => void handleSubmit(event)}>
@@ -659,15 +667,17 @@ function LoginScreen({
             <Icon name="shield" size={16} />
             Войти
           </button>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={submitState.loading}
-            onClick={() => void handleDevAdminLogin()}
-          >
-            <Icon name="key" size={16} />
-            Войти как админ
-          </button>
+          {DEV_ADMIN_LOGIN_ENABLED ? (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={submitState.loading}
+              onClick={() => void handleDevAdminLogin()}
+            >
+              <Icon name="key" size={16} />
+              Войти как локальный админ
+            </button>
+          ) : null}
         </form>
       </section>
     </main>

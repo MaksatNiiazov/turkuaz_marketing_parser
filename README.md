@@ -151,6 +151,7 @@ Identity settings:
 AUTH_ENABLED=true
 IDENTITY_SECRET_KEY=dev-change-me-32-byte-secret-key-for-turkuaz-identity
 IDENTITY_ALGORITHM=HS256
+DEV_ADMIN_LOGIN_ENABLED=false
 VITE_IDENTITY_PROXY_TARGET=http://localhost:8500
 VITE_IDENTITY_API_FALLBACK_BASE_URL=http://localhost:8500/api/v1
 ```
@@ -164,6 +165,11 @@ market_parser_viewer
 market_parser_operator
 market_parser_manager
 ```
+
+Market Parser data is global rather than branch-scoped, so these roles must be assigned globally
+in Identity. Branch-scoped permission claims do not grant access to the module's global API.
+The optional local admin login is disabled by default; enable it only in an isolated development
+environment with `DEV_ADMIN_LOGIN_ENABLED=true` and `VITE_DEV_ADMIN_LOGIN_ENABLED=true`.
 
 ## Globus Notes
 

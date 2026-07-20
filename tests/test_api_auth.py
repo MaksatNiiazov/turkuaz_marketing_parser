@@ -45,6 +45,28 @@ def test_permission_accepts_active_branch_scope():
         },
         "market_parser.products.read",
     )
+
+
+def test_global_route_rejects_active_branch_scope():
+    client = TestClient(app)
+    token = jwt.encode(
+        {
+            "sub": "branch-user",
+            "active_branch_id": 7,
+            "branch_permissions_by_id": {"7": ["market_parser.sources.read"]},
+            "permissions": [],
+        },
+        settings.identity_secret_key,
+        algorithm=settings.identity_algorithm,
+    )
+
+    response = client.get(
+        "/api/v1/market-parser/sources",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Missing permission: market_parser.sources.read"}
     assert has_permission(
         {
             "active_branch_id": 7,
