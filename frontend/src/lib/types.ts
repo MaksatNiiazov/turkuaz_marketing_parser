@@ -141,6 +141,67 @@ export type CategoryStats = {
   price_decreased_products: number;
 };
 
+export type ReportSection = 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability';
+
+export type ComparisonSummary = {
+  base_products: number;
+  current_products: number;
+  comparable_products: number;
+  new_products: number;
+  disappeared_products: number;
+  price_increased: number;
+  price_decreased: number;
+  price_unchanged: number;
+  promotions_started: number;
+  promotions_ended: number;
+  available_products: number;
+  unavailable_products: number;
+  unknown_availability: number;
+  became_available: number;
+  became_unavailable: number;
+  average_price_change_percent: string | number | null;
+};
+
+export type ComparisonItem = {
+  product_id: number;
+  sku: string | null;
+  name: string;
+  category_id: number | null;
+  category_name: string | null;
+  product_url: string | null;
+  event_types: string[];
+  old_price: string | number | null;
+  new_price: string | number | null;
+  old_effective_price: string | number | null;
+  new_effective_price: string | number | null;
+  price_change_percent: string | number | null;
+  old_discount_percent: string | number | null;
+  new_discount_percent: string | number | null;
+  old_availability: boolean | null;
+  new_availability: boolean | null;
+};
+
+export type RunComparisonReport = {
+  base_run: { id: number; status: string; collected_at: string | null };
+  compare_run: { id: number; status: string; collected_at: string | null };
+  summary: ComparisonSummary;
+  items: ComparisonItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type DataQualityReport = {
+  latest_run: { id: number; status: string; collected_at: string | null } | null;
+  failed_categories: number;
+  stale_categories: number;
+  missing_price: number;
+  missing_sku: number;
+  missing_image: number;
+  missing_product_url: number;
+  issues: Array<{ code: string; severity: string; label: string; count: number }>;
+};
+
 export type CurrentUser = {
   id: number;
   active: boolean;

@@ -47,11 +47,23 @@ import type {
   ProductSnapshot,
   ProductStats,
 } from './lib/types';
+import { ReportsWorkspace } from './ReportsWorkspace';
 
 const IDENTITY_API_BASE_URL = import.meta.env.VITE_IDENTITY_API_BASE_URL || '/identity-api';
 const API_DOCS_URL = backendUrl(8503, '/docs');
 
-type ViewMode = 'categories' | 'runs' | 'products' | 'reports' | 'export';
+type ViewMode =
+  | 'categories'
+  | 'runs'
+  | 'products'
+  | 'overview'
+  | 'assortment'
+  | 'prices'
+  | 'promotions'
+  | 'availability'
+  | 'quality'
+  | 'reports'
+  | 'export';
 
 type LoadState = {
   loading: boolean;
@@ -402,7 +414,12 @@ export function App() {
     { key: 'categories', label: 'Категории', icon: 'sliders' as const, active: view === 'categories', onClick: () => setView('categories') },
     { key: 'runs', label: 'Запуски', icon: 'activity' as const, active: view === 'runs', onClick: () => setView('runs') },
     { key: 'products', label: 'Товары', icon: 'database' as const, active: view === 'products', onClick: () => setView('products') },
-    { key: 'reports', label: 'Отчеты', icon: 'dashboard' as const, active: view === 'reports', onClick: () => setView('reports') },
+    { key: 'overview', label: 'Обзор', icon: 'dashboard' as const, active: view === 'overview', onClick: () => setView('overview') },
+    { key: 'assortment', label: 'Ассортимент', icon: 'qr' as const, active: view === 'assortment', onClick: () => setView('assortment') },
+    { key: 'prices', label: 'Цены', icon: 'activity' as const, active: view === 'prices', onClick: () => setView('prices') },
+    { key: 'promotions', label: 'Промо', icon: 'shield' as const, active: view === 'promotions', onClick: () => setView('promotions') },
+    { key: 'availability', label: 'Наличие', icon: 'database' as const, active: view === 'availability', onClick: () => setView('availability') },
+    { key: 'quality', label: 'Контроль', icon: 'sliders' as const, active: view === 'quality', onClick: () => setView('quality') },
     { key: 'export', label: 'Экспорт', icon: 'file' as const, active: view === 'export', onClick: () => setView('export') },
   ];
 
@@ -410,6 +427,12 @@ export function App() {
     categories: 'Market Parser',
     runs: 'История запусков',
     products: 'Товары и цены',
+    overview: 'Обзор изменений',
+    assortment: 'Ассортимент',
+    prices: 'Цены',
+    promotions: 'Промо и скидки',
+    availability: 'Наличие',
+    quality: 'Контроль данных',
     reports: 'Аналитика',
     export: 'Экспорт Excel',
   }[view];
@@ -418,6 +441,12 @@ export function App() {
     categories: 'Источники, категории Globus и ручной запуск парсинга.',
     runs: 'Статусы запусков, найденные товары и ошибки по категориям.',
     products: 'Каталог товаров, snapshots и история цены.',
+    overview: 'Главные изменения между двумя завершенными запусками.',
+    assortment: 'Новые, исчезнувшие и вернувшиеся товары.',
+    prices: 'Рост и снижение базовых цен между запусками.',
+    promotions: 'Начавшиеся и завершившиеся акции.',
+    availability: 'Подтвержденные изменения доступности товаров.',
+    quality: 'Полнота данных и техническое качество парсинга.',
     reports: 'Статистика по товару и категории за выбранный период.',
     export: 'Готовые Excel выгрузки для маркетинга.',
   }[view];
@@ -569,6 +598,17 @@ export function App() {
           onSelectCategory={setSelectedCategoryId}
           onSelectProduct={handleSelectProduct}
           onFilterChange={setFilters}
+        />
+      ) : null}
+
+      {(['overview', 'assortment', 'prices', 'promotions', 'availability', 'quality'] as const).includes(
+        view as 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability' | 'quality',
+      ) ? (
+        <ReportsWorkspace
+          section={view as 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability' | 'quality'}
+          sourceId={selectedSourceId}
+          categories={categories}
+          runs={runs}
         />
       ) : null}
 

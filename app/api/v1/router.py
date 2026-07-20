@@ -5,6 +5,7 @@ from app.modules.market_parser.api import (
     routes_categories,
     routes_export,
     routes_products,
+    routes_reports,
     routes_runs,
     routes_sources,
     routes_stats,
@@ -18,4 +19,5 @@ api_router.include_router(routes_categories.router, prefix="/market-parser", tag
 api_router.include_router(routes_runs.router, prefix="/market-parser", tags=["market-parser"])
 api_router.include_router(routes_products.router, prefix="/market-parser", tags=["market-parser"])
 api_router.include_router(routes_stats.router, prefix="/market-parser", tags=["market-parser"])
+api_router.include_router(routes_reports.router, prefix="/market-parser", tags=["market-parser-reports"])
 api_router.include_router(routes_export.router, prefix="/market-parser", tags=["market-parser"])

@@ -11,6 +11,8 @@ import type {
   ProductSnapshot,
   ProductSummary,
   ProductStats,
+  RunComparisonReport,
+  DataQualityReport,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -281,6 +283,32 @@ export function fetchTopDiscounts(filters: {
   offset?: number;
 }): Promise<ProductDiscountPage> {
   return requestJson<ProductDiscountPage>(`/api/v1/market-parser/reports/top-discounts${params(filters)}`);
+}
+
+export function fetchRunComparison(filters: {
+  source_id: number;
+  base_run_id?: number;
+  compare_run_id?: number;
+  category_id?: number;
+  event_type?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<RunComparisonReport> {
+  const { source_id, base_run_id, compare_run_id, ...rest } = filters;
+  if (base_run_id && compare_run_id) {
+    return requestJson<RunComparisonReport>(
+      `/api/v1/market-parser/reports/comparison${params({ base_run_id, compare_run_id, ...rest })}`,
+    );
+  }
+  return requestJson<RunComparisonReport>(
+    `/api/v1/market-parser/reports/latest-comparison${params({ source_id, ...rest })}`,
+  );
+}
+
+export function fetchDataQuality(sourceId: number): Promise<DataQualityReport> {
+  return requestJson<DataQualityReport>(
+    `/api/v1/market-parser/reports/quality${params({ source_id: sourceId })}`,
+  );
 }
 
 export async function login(email: string, password: string): Promise<void> {
