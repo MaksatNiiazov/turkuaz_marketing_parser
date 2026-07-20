@@ -52,18 +52,8 @@ import { ReportsWorkspace } from './ReportsWorkspace';
 const IDENTITY_API_BASE_URL = import.meta.env.VITE_IDENTITY_API_BASE_URL || '/identity-api';
 const API_DOCS_URL = backendUrl(8503, '/docs');
 
-type ViewMode =
-  | 'categories'
-  | 'runs'
-  | 'products'
-  | 'overview'
-  | 'assortment'
-  | 'prices'
-  | 'promotions'
-  | 'availability'
-  | 'quality'
-  | 'reports'
-  | 'export';
+type ViewMode = 'categories' | 'runs' | 'products' | 'reports' | 'export';
+type ReportTab = 'classic' | 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability' | 'quality';
 
 type LoadState = {
   loading: boolean;
@@ -121,6 +111,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<CurrentIdentityUser | null>(null);
   const [serviceApps, setServiceApps] = useState<ServiceRegistryItem[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
+  const [reportTab, setReportTab] = useState<ReportTab>('classic');
 
   const selectedSource = sources.find((source) => source.id === selectedSourceId) ?? sources[0] ?? null;
   const selectedProduct =
@@ -191,10 +182,10 @@ export function App() {
   }, [loadData]);
 
   useEffect(() => {
-    if ((view === 'products' || view === 'reports') && selectedSource) {
+    if ((view === 'products' || (view === 'reports' && reportTab === 'classic')) && selectedSource) {
       void loadProducts(productPage, productPageSize);
     }
-  }, [view, selectedSource?.id, productLoadVersion, productPage, productPageSize]);
+  }, [view, reportTab, selectedSource?.id, productLoadVersion, productPage, productPageSize]);
 
   useEffect(() => {
     if (!selectedProduct) {
@@ -242,7 +233,9 @@ export function App() {
           if (!isRunActive(run)) {
             setActiveRunId(null);
             void refreshProductSummary();
-            if (view === 'products' || view === 'reports') void loadProducts(productPage, productPageSize);
+            if (view === 'products' || (view === 'reports' && reportTab === 'classic')) {
+              void loadProducts(productPage, productPageSize);
+            }
           }
         })
         .catch((error) =>
@@ -251,7 +244,7 @@ export function App() {
     }, 1500);
 
     return () => window.clearInterval(timer);
-  }, [activeRunId, runs, selectedSource?.id, view]);
+  }, [activeRunId, runs, selectedSource?.id, view, reportTab]);
 
   async function handleSyncCategories() {
     if (!selectedSource) return;
@@ -414,12 +407,7 @@ export function App() {
     { key: 'categories', label: 'Категории', icon: 'sliders' as const, active: view === 'categories', onClick: () => setView('categories') },
     { key: 'runs', label: 'Запуски', icon: 'activity' as const, active: view === 'runs', onClick: () => setView('runs') },
     { key: 'products', label: 'Товары', icon: 'database' as const, active: view === 'products', onClick: () => setView('products') },
-    { key: 'overview', label: 'Обзор', icon: 'dashboard' as const, active: view === 'overview', onClick: () => setView('overview') },
-    { key: 'assortment', label: 'Ассортимент', icon: 'qr' as const, active: view === 'assortment', onClick: () => setView('assortment') },
-    { key: 'prices', label: 'Цены', icon: 'activity' as const, active: view === 'prices', onClick: () => setView('prices') },
-    { key: 'promotions', label: 'Промо', icon: 'shield' as const, active: view === 'promotions', onClick: () => setView('promotions') },
-    { key: 'availability', label: 'Наличие', icon: 'database' as const, active: view === 'availability', onClick: () => setView('availability') },
-    { key: 'quality', label: 'Контроль', icon: 'sliders' as const, active: view === 'quality', onClick: () => setView('quality') },
+    { key: 'reports', label: 'Отчеты', icon: 'dashboard' as const, active: view === 'reports', onClick: () => setView('reports') },
     { key: 'export', label: 'Экспорт', icon: 'file' as const, active: view === 'export', onClick: () => setView('export') },
   ];
 
@@ -427,12 +415,6 @@ export function App() {
     categories: 'Market Parser',
     runs: 'История запусков',
     products: 'Товары и цены',
-    overview: 'Обзор изменений',
-    assortment: 'Ассортимент',
-    prices: 'Цены',
-    promotions: 'Промо и скидки',
-    availability: 'Наличие',
-    quality: 'Контроль данных',
     reports: 'Аналитика',
     export: 'Экспорт Excel',
   }[view];
@@ -441,13 +423,7 @@ export function App() {
     categories: 'Источники, категории Globus и ручной запуск парсинга.',
     runs: 'Статусы запусков, найденные товары и ошибки по категориям.',
     products: 'Каталог товаров, snapshots и история цены.',
-    overview: 'Главные изменения между двумя завершенными запусками.',
-    assortment: 'Новые, исчезнувшие и вернувшиеся товары.',
-    prices: 'Рост и снижение базовых цен между запусками.',
-    promotions: 'Начавшиеся и завершившиеся акции.',
-    availability: 'Подтвержденные изменения доступности товаров.',
-    quality: 'Полнота данных и техническое качество парсинга.',
-    reports: 'Статистика по товару и категории за выбранный период.',
+    reports: 'Классические и сравнительные отчеты в одном рабочем разделе.',
     export: 'Готовые Excel выгрузки для маркетинга.',
   }[view];
 
@@ -581,35 +557,36 @@ export function App() {
       ) : null}
 
       {view === 'reports' ? (
-        <ReportsView
-          categories={categories}
-          products={products}
-          runs={runs}
-          productCount={productCount}
-          productSegments={productSegments}
-          selectedCategoryId={selectedCategoryId}
-          selectedProduct={selectedProduct}
-          productStats={productStats}
-          categoryStats={categoryStats}
-          latestRun={latestRun}
-          productsLoading={productsLoading}
-          filters={filters}
-          markedDateKeys={parsedDateKeys}
-          onSelectCategory={setSelectedCategoryId}
-          onSelectProduct={handleSelectProduct}
-          onFilterChange={setFilters}
-        />
-      ) : null}
-
-      {(['overview', 'assortment', 'prices', 'promotions', 'availability', 'quality'] as const).includes(
-        view as 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability' | 'quality',
-      ) ? (
-        <ReportsWorkspace
-          section={view as 'overview' | 'assortment' | 'prices' | 'promotions' | 'availability' | 'quality'}
-          sourceId={selectedSourceId}
-          categories={categories}
-          runs={runs}
-        />
+        <>
+          <ReportTabs value={reportTab} onChange={setReportTab} />
+          {reportTab === 'classic' ? (
+            <ReportsView
+              categories={categories}
+              products={products}
+              runs={runs}
+              productCount={productCount}
+              productSegments={productSegments}
+              selectedCategoryId={selectedCategoryId}
+              selectedProduct={selectedProduct}
+              productStats={productStats}
+              categoryStats={categoryStats}
+              latestRun={latestRun}
+              productsLoading={productsLoading}
+              filters={filters}
+              markedDateKeys={parsedDateKeys}
+              onSelectCategory={setSelectedCategoryId}
+              onSelectProduct={handleSelectProduct}
+              onFilterChange={setFilters}
+            />
+          ) : (
+            <ReportsWorkspace
+              section={reportTab}
+              sourceId={selectedSourceId}
+              categories={categories}
+              runs={runs}
+            />
+          )}
+        </>
       ) : null}
 
       {view === 'export' ? (
@@ -630,6 +607,33 @@ export function App() {
     setSelectedProductId(product?.id ?? null);
     setSelectedProductRecord(product);
   }
+}
+
+function ReportTabs({ value, onChange }: { value: ReportTab; onChange: (value: ReportTab) => void }) {
+  const tabs: Array<{ key: ReportTab; label: string }> = [
+    { key: 'classic', label: 'Классический отчет' },
+    { key: 'overview', label: 'Обзор' },
+    { key: 'assortment', label: 'Ассортимент' },
+    { key: 'prices', label: 'Цены' },
+    { key: 'promotions', label: 'Промо' },
+    { key: 'availability', label: 'Наличие' },
+    { key: 'quality', label: 'Контроль данных' },
+  ];
+  return (
+    <nav className="report-tabs" aria-label="Виды отчетов">
+      {tabs.map((tab) => (
+        <button
+          className={value === tab.key ? 'active' : ''}
+          type="button"
+          key={tab.key}
+          aria-current={value === tab.key ? 'page' : undefined}
+          onClick={() => onChange(tab.key)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </nav>
+  );
 }
 
 function LoginScreen({

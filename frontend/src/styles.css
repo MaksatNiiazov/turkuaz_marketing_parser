@@ -189,6 +189,43 @@
   gap: 16px;
 }
 
+.report-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  scrollbar-width: thin;
+}
+
+.report-tabs button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.report-tabs button:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.report-tabs button.active {
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--border));
+  background: color-mix(in srgb, var(--teal) 12%, var(--surface-raised));
+  color: var(--teal-strong);
+}
+
 .report-workspace-head {
   display: flex;
   align-items: end;
