@@ -579,7 +579,14 @@ export function App() {
               onFilterChange={setFilters}
             />
           ) : (
-            <ReportsWorkspace section={reportTab} sourceId={selectedSourceId} categories={categories} runs={runs} />
+            <ReportsWorkspace
+              section={reportTab}
+              sourceId={selectedSourceId}
+              categories={categories}
+              runs={runs}
+              categoryId={selectedCategoryId}
+              onCategoryChange={setSelectedCategoryId}
+            />
           )}
         </>
       ) : null}

@@ -15,6 +15,8 @@ type Props = {
   sourceId: number | null;
   categories: ParserCategory[];
   runs: ParserRun[];
+  categoryId: number | null;
+  onCategoryChange: (categoryId: number) => void;
 };
 
 const sectionMeta: Record<ReportSection, { title: string; description: string; events: string[] }> = {
@@ -40,21 +42,29 @@ const sectionMeta: Record<ReportSection, { title: string; description: string; e
   },
 };
 
-export function ReportsWorkspace({ section, sourceId, categories, runs }: Props) {
+export function ReportsWorkspace({ section, sourceId, categories, runs, categoryId, onCategoryChange }: Props) {
   if (section === 'quality') {
     return <QualityView sourceId={sourceId} />;
   }
-  return <ComparisonView section={section} sourceId={sourceId} categories={categories} runs={runs} />;
+  return (
+    <ComparisonView
+      section={section}
+      sourceId={sourceId}
+      categories={categories}
+      runs={runs}
+      categoryId={categoryId}
+      onCategoryChange={onCategoryChange}
+    />
+  );
 }
 
-function ComparisonView({ section, sourceId, categories, runs }: Omit<Props, 'section'> & { section: ReportSection }) {
+function ComparisonView({ section, sourceId, categories, runs, categoryId, onCategoryChange }: Omit<Props, 'section'> & { section: ReportSection }) {
   const finishedRuns = useMemo(
     () => runs.filter((run) => run.status === 'success' || run.status === 'partial'),
     [runs],
   );
   const [baseRunId, setBaseRunId] = useState<number | null>(null);
   const [compareRunId, setCompareRunId] = useState<number | null>(null);
-  const [categoryId, setCategoryId] = useState<number | null>(null);
   const [report, setReport] = useState<RunComparisonReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,8 +110,8 @@ function ComparisonView({ section, sourceId, categories, runs }: Omit<Props, 'se
           <RunSelect label="Сравниваемый" value={compareRunId} runs={finishedRuns} onChange={setCompareRunId} />
           <label>
             <span>Категория</span>
-            <select value={categoryId ?? ''} onChange={(event) => setCategoryId(event.target.value ? Number(event.target.value) : null)}>
-              <option value="">Все категории</option>
+            <select value={categoryId ?? ''} onChange={(event) => onCategoryChange(Number(event.target.value))} disabled={!categories.length}>
+              {!categories.length ? <option value="">Нет категорий</option> : null}
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </label>
